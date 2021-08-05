@@ -350,20 +350,14 @@ func (v *NetworkPolicyValidator) validateTier(curTier, oldTier *crdv1alpha1.Tier
 	return reason, allowed
 }
 
-func (v *antreaPolicyValidator) tierExists(name string) bool {
-	_, err := v.networkPolicyController.tierLister.Get(name)
-	if err != nil {
-		return false
-	}
-	return true
+func (a *antreaPolicyValidator) tierExists(name string) bool {
+	_, err := a.networkPolicyController.tierLister.Get(name)
+	return err == nil
 }
 
-func (v *antreaPolicyValidator) clusterGroupExists(name string) bool {
-	_, err := v.networkPolicyController.cgLister.Get(name)
-	if err != nil {
-		return false
-	}
-	return true
+func (a *antreaPolicyValidator) clusterGroupExists(name string) bool {
+	_, err := a.networkPolicyController.cgLister.Get(name)
+	return err == nil
 }
 
 // GetAdmissionResponseForErr returns an object of type AdmissionResponse with
@@ -403,7 +397,7 @@ func (a *antreaPolicyValidator) createValidate(curObj interface{}, userInfo auth
 		return reason, allowed
 	}
 	if ruleNameUnique := a.validateRuleName(ingress, egress); !ruleNameUnique {
-		return fmt.Sprint("rules names must be unique within the policy"), false
+		return "rules names must be unique within the policy", false
 	}
 	reason, allowed = a.validateAppliedTo(ingress, egress, specAppliedTo)
 	if !allowed {
@@ -420,7 +414,7 @@ func (a *antreaPolicyValidator) createValidate(curObj interface{}, userInfo auth
 }
 
 // validateRuleName validates if the name of each rule is unique within a policy
-func (v *antreaPolicyValidator) validateRuleName(ingress, egress []crdv1alpha1.Rule) bool {
+func (a *antreaPolicyValidator) validateRuleName(ingress, egress []crdv1alpha1.Rule) bool {
 	uniqueRuleName := sets.NewString()
 	isUnique := func(rules []crdv1alpha1.Rule) bool {
 		for _, rule := range rules {
@@ -525,13 +519,13 @@ func (a *antreaPolicyValidator) validatePeers(ingress, egress []crdv1alpha1.Rule
 }
 
 // validateTierForPolicy validates whether a referenced Tier exists.
-func (v *antreaPolicyValidator) validateTierForPolicy(tier string) (string, bool) {
+func (a *antreaPolicyValidator) validateTierForPolicy(tier string) (string, bool) {
 	// "tier" must exist before referencing
 	if tier == "" || staticTierSet.Has(tier) {
 		// Empty Tier name corresponds to default Tier.
 		return "", true
 	}
-	if ok := v.tierExists(tier); !ok {
+	if ok := a.tierExists(tier); !ok {
 		reason := fmt.Sprintf("tier %s does not exist", tier)
 		return reason, false
 	}

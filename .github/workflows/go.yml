@@ -55,6 +55,19 @@ jobs:
     - name: Run golangci-lint
       run: make golangci
 
+  golint:
+    name: Golint
+    runs-on: [ubuntu-latest]
+    steps:
+    - name: Set up Go 1.15
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.15
+    - name: Check-out code
+      uses: actions/checkout@v2
+    - name: Run golint
+      run: make lint
+
 
   golangci-lint-netpol-tmp:
     name: Golangci-lint for netpol code

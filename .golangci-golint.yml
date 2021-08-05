@@ -1,4 +1,4 @@
-# golangci-lint configuration used to run golint only (with all warnings enabled)
+# golangci-lint configuration used to run golint only
 run:
   tests: true
   timeout: 5m
@@ -7,7 +7,16 @@ run:
   skip-dirs-use-default: true
 
 issues:
-  exclude-use-default: false
+  exclude-use-default: true
+  max-same-issues: 0
+  max-issues-per-linter: 0
+  exclude:
+    - don't use ALL_CAPS in Go names
+    - don't use underscores in Go names
+    - should replace `.* \+= 1` with `.*\+\+`
+    - error var .* should have name of the form errFoo
+    - .* returns unexported type.*, which can be annoying to use
+    - (type|func) name will be used as .* by other packages, and that stutters; consider calling this
 
 linters:
   disable-all: true

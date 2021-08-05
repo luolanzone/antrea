@@ -165,8 +165,8 @@ func (n *NetworkPolicyController) enqueueInternalGroup(key string) {
 	n.internalGroupQueue.Add(key)
 }
 
-func (c *NetworkPolicyController) internalGroupWorker() {
-	for c.processNextInternalGroupWorkItem() {
+func (n *NetworkPolicyController) internalGroupWorker() {
+	for n.processNextInternalGroupWorkItem() {
 	}
 }
 
@@ -177,23 +177,23 @@ func (c *NetworkPolicyController) internalGroupWorker() {
 // successful, the ClusterGroup is removed from the queue until we get notify
 // of a new change. This function return false if and only if the work queue
 // was shutdown (no more items will be processed).
-func (c *NetworkPolicyController) processNextInternalGroupWorkItem() bool {
-	key, quit := c.internalGroupQueue.Get()
+func (n *NetworkPolicyController) processNextInternalGroupWorkItem() bool {
+	key, quit := n.internalGroupQueue.Get()
 	if quit {
 		return false
 	}
-	defer c.internalGroupQueue.Done(key)
+	defer n.internalGroupQueue.Done(key)
 
-	err := c.syncInternalGroup(key.(string))
+	err := n.syncInternalGroup(key.(string))
 	if err != nil {
 		// Put the item back in the workqueue to handle any transient errors.
-		c.internalGroupQueue.AddRateLimited(key)
+		n.internalGroupQueue.AddRateLimited(key)
 		klog.Errorf("Failed to sync internal Group %s: %v", key, err)
 		return true
 	}
 	// If no error occurs we Forget this item so it does not get queued again until
 	// another change happens.
-	c.internalGroupQueue.Forget(key)
+	n.internalGroupQueue.Forget(key)
 	return true
 }
 

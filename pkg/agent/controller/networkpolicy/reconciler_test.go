@@ -93,8 +93,8 @@ var (
 )
 
 func newCIDR(cidrStr string) *net.IPNet {
-	_, tmpIpNet, _ := net.ParseCIDR(cidrStr)
-	return tmpIpNet
+	_, tmpIPNet, _ := net.ParseCIDR(cidrStr)
+	return tmpIPNet
 }
 
 func TestReconcilerForget(t *testing.T) {

@@ -1625,38 +1625,6 @@ rules:
   - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  labels:
-    app: antrea
-  name: antrea-multicluster-metrics-reader
-rules:
-- nonResourceURLs:
-  - /metrics
-  verbs:
-  - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  labels:
-    app: antrea
-  name: antrea-multicluster-proxy-role
-rules:
-- apiGroups:
-  - authentication.k8s.io
-  resources:
-  - tokenreviews
-  verbs:
-  - create
-- apiGroups:
-  - authorization.k8s.io
-  resources:
-  - subjectaccessreviews
-  verbs:
-  - create
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   labels:
@@ -1687,21 +1655,6 @@ subjects:
   name: antrea-multicluster-controller
   namespace: kube-system
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  labels:
-    app: antrea
-  name: antrea-multicluster-proxy-rolebinding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: antrea-multicluster-proxy-role
-subjects:
-- kind: ServiceAccount
-  name: antrea-multicluster-controller
-  namespace: kube-system
----
 apiVersion: v1
 data:
   controller_manager_config.yaml: |
@@ -1722,23 +1675,6 @@ metadata:
     app: antrea
   name: antrea-multicluster-manager-config
   namespace: kube-system
----
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    app: antrea
-    control-plane: antrea-multicluster-controller
-  name: antrea-multicluster-controller-metrics-service
-  namespace: kube-system
-spec:
-  ports:
-  - name: https
-    port: 8443
-    targetPort: https
-  selector:
-    app: antrea
-    control-plane: antrea-multicluster-controller
 ---
 apiVersion: v1
 kind: Service
@@ -1871,7 +1807,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /mutate-multicluster-crd-antrea-io-v1alpha1-clusterclaim
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: mclusterclaim.kb.io
   rules:
   - apiGroups:
@@ -1892,7 +1828,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /mutate-multicluster-crd-antrea-io-v1alpha1-clusterset
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: mclusterset.kb.io
   rules:
   - apiGroups:
@@ -1913,7 +1849,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /mutate-multicluster-crd-antrea-io-v1alpha1-memberclusterannounce
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: mmemberclusterannounce.kb.io
   rules:
   - apiGroups:
@@ -1934,7 +1870,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /mutate-multicluster-crd-antrea-io-v1alpha1-resourceexport
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: mresourceexport.kb.io
   rules:
   - apiGroups:
@@ -1955,7 +1891,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /mutate-multicluster-crd-antrea-io-v1alpha1-resourceimport
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: mresourceimport.kb.io
   rules:
   - apiGroups:
@@ -1986,7 +1922,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /validate-multicluster-crd-antrea-io-v1alpha1-clusterclaim
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: vclusterclaim.kb.io
   rules:
   - apiGroups:
@@ -2007,7 +1943,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /validate-multicluster-crd-antrea-io-v1alpha1-clusterset
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: vclusterset.kb.io
   rules:
   - apiGroups:
@@ -2028,7 +1964,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /validate-multicluster-crd-antrea-io-v1alpha1-memberclusterannounce
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: vmemberclusterannounce.kb.io
   rules:
   - apiGroups:
@@ -2049,7 +1985,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /validate-multicluster-crd-antrea-io-v1alpha1-resourceexport
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: vresourceexport.kb.io
   rules:
   - apiGroups:
@@ -2070,7 +2006,7 @@ webhooks:
       name: antrea-multicluster-webhook-service
       namespace: kube-system
       path: /validate-multicluster-crd-antrea-io-v1alpha1-resourceimport
-  failurePolicy: Fail
+  failurePolicy: Ignore
   name: vresourceimport.kb.io
   rules:
   - apiGroups:

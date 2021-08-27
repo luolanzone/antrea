@@ -32,7 +32,7 @@ func (r *ResourceExport) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-//+kubebuilder:webhook:path=/mutate-multicluster-crd-antrea-io-v1alpha1-resourceexport,mutating=true,failurePolicy=fail,sideEffects=None,groups=multicluster.crd.antrea.io,resources=resourceexports,verbs=create;update,versions=v1alpha1,name=mresourceexport.kb.io,admissionReviewVersions={v1,v1beta1}
+//+kubebuilder:webhook:path=/mutate-multicluster-crd-antrea-io-v1alpha1-resourceexport,mutating=true,failurePolicy=ignore,sideEffects=None,groups=multicluster.crd.antrea.io,resources=resourceexports,verbs=create;update,versions=v1alpha1,name=mresourceexport.kb.io,admissionReviewVersions={v1,v1beta1}
 
 var _ webhook.Defaulter = &ResourceExport{}
 
@@ -41,7 +41,7 @@ func (r *ResourceExport) Default() {
 	resourceexportlog.Info("default", "name", r.Name)
 }
 
-//+kubebuilder:webhook:path=/validate-multicluster-crd-antrea-io-v1alpha1-resourceexport,mutating=false,failurePolicy=fail,sideEffects=None,groups=multicluster.crd.antrea.io,resources=resourceexports,verbs=create;update,versions=v1alpha1,name=vresourceexport.kb.io,admissionReviewVersions={v1,v1beta1}
+//+kubebuilder:webhook:path=/validate-multicluster-crd-antrea-io-v1alpha1-resourceexport,mutating=false,failurePolicy=ignore,sideEffects=None,groups=multicluster.crd.antrea.io,resources=resourceexports,verbs=create;update,versions=v1alpha1,name=vresourceexport.kb.io,admissionReviewVersions={v1,v1beta1}
 
 var _ webhook.Validator = &ResourceExport{}
 

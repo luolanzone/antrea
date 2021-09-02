@@ -21,6 +21,7 @@ const (
 	ServiceKind                    = "Service"
 	EndpointsKind                  = "Endpoints"
 	ServiceImportKind              = "ServiceImport"
+	SourceServiceType              = "SourceServiceType"
 )
 
 var LeaderNameSpace string

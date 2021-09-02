@@ -18,7 +18,9 @@ package multicluster
 
 import (
 	"context"
+	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,7 @@ import (
 	k8smcsv1alpha1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 	k8smcsversioned "sigs.k8s.io/mcs-api/pkg/client/clientset/versioned"
 
+	"antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	antreamcsversioned "antrea.io/antrea/multicluster/pkg/client/clientset/versioned"
 )
@@ -136,40 +139,54 @@ func epIndexerByLabelFunc(obj interface{}) ([]string, error) {
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	klog.Infof("request namespace %s, name %s ", req.NamespacedName, req.Name)
+	klog.V(2).Infof("reconcile for %s", req.NamespacedName)
 	var svcExport k8smcsv1alpha1.ServiceExport
+	if len(LocalClusterID) == 0 {
+		return ctrl.Result{}, fmt.Errorf("LocalClusterID is not initialized, skip reconcile")
+	}
 	clusterID := LocalClusterID
 
-	key := getKey(req)
+	key := req.Namespace + req.Name
 	svcObj, svcInstalled, _ := r.installedSvcs.GetByKey(key)
 	epObj, epInstalled, _ := r.installedEps.GetByKey(key)
 	resExportBaseName := clusterID + "-" + req.Namespace + "-" + req.Name
-	svcResExportName := getResourceExportName(resExportBaseName, ServiceKind)
-	epResExportName := getResourceExportName(resExportBaseName, EndpointsKind)
+	svcResExportName := resExportBaseName + "-" + strings.ToLower(ServiceKind)
+	epResExportName := resExportBaseName + "-" + strings.ToLower(EndpointsKind)
 
 	if err := r.Client.Get(ctx, req.NamespacedName, &svcExport); err != nil {
 		klog.Infof("unable to fetch ServiceExport %s/%s, err: %v", req.Namespace, req.Name, err)
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
-		// clean up Service/Endpoints kind of ResourceExport in leader cluster
-		klog.Infof("deleting ResourceExport %s/%s in Leader Cluster", LeaderNameSpace, svcResExportName)
-		err = r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Delete(ctx, svcResExportName, metav1.DeleteOptions{})
-		if err != nil {
-			klog.Errorf("fail to delete ResourceExport %s/%s, err: %v", LeaderNameSpace, svcResExportName, err)
+		// cleanup labels of Service so we don't watch service event anymore
+		svc, err := r.K8sClient.CoreV1().Services(req.Namespace).Get(ctx, req.Name, metav1.GetOptions{})
+		if err == nil {
+			delete(svc.Labels, antreaMultiClusterServiceLabel)
+			// ignore error since the service event will be triggered again, then here we can delete in another time.
+			_, _ = r.K8sClient.CoreV1().Services(req.Namespace).Update(ctx, svc, metav1.UpdateOptions{})
+		} else {
+			klog.Warningf("fail to get service %v", req.NamespacedName, err)
 		}
-		klog.Infof("deleting ResourceExport %s/%s in Leader Cluster", LeaderNameSpace, epResExportName)
-		err = r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Delete(ctx, epResExportName, metav1.DeleteOptions{})
-		if err != nil {
-			klog.Errorf("fail to delete ResourceExport %s/%s, err: %v", req.Namespace, epResExportName, err)
+
+		// clean up Service/Endpoints kind of ResourceExport in leader cluster
+		err = r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Delete(ctx, svcResExportName, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			klog.Warningf("fail to delete ResourceExport %s/%s, err: %v", LeaderNameSpace, svcResExportName, err)
+			return ctrl.Result{}, err
 		}
 		if svcInstalled {
-			_ = r.installedSvcs.Delete(svcObj)
+			r.installedSvcs.Delete(svcObj)
+		}
+
+		err = r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Delete(ctx, epResExportName, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			klog.Warningf("fail to delete ResourceExport %s/%s, err: %v", req.Namespace, epResExportName, err)
+			return ctrl.Result{}, err
 		}
 		if epInstalled {
-			_ = r.installedEps.Delete(epObj)
+			r.installedEps.Delete(epObj)
 		}
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, nil
 	}
 
 	// check if corresponding service exists or not, if it's deleted
@@ -204,7 +221,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Name:      svc.Name,
 			Namespace: svc.Namespace,
 			Labels: map[string]string{
-				"SourceServiceType": string(corev1.ServiceTypeNodePort),
+				SourceServiceType: string(corev1.ServiceTypeNodePort),
 			},
 		},
 	}
@@ -213,7 +230,6 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// Build up Endpoint with Node ip and nodePort for NodePort service.
 		nodes, err := r.K8sClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{FieldSelector: "spec.unschedulable=false"})
 		if err != nil {
-			klog.Error("fail to get nodes list")
 			return ctrl.Result{}, err
 		}
 		var addresses []corev1.EndpointAddress
@@ -234,6 +250,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		var ports []corev1.EndpointPort
 		for _, p := range svc.Spec.Ports {
 			ports = append(ports, corev1.EndpointPort{
+				Name:     strconv.Itoa(int(p.Port)) + string(p.Protocol),
 				Port:     p.NodePort,
 				Protocol: p.Protocol,
 			})
@@ -355,21 +372,14 @@ func (r *ServiceExportReconciler) serviceHandler(
 		if !apierrors.IsNotFound(err) {
 			return err
 		}
-		if err = r.createResourceExport(resName, ctx, req, &re); err != nil {
-			return err
-		}
-		// update Service's label with `antrea.io/multi-cluster` so we can watch Service's events via event mapping function.
-		labels := svc.DeepCopy().Labels
-		labels[antreaMultiClusterServiceLabel] = "true"
-		svc.Labels = labels
-		if _, err := r.K8sClient.CoreV1().Services(svc.Namespace).Update(ctx, svc, metav1.UpdateOptions{}); err != nil {
-			klog.Infof("fail to update Service %s/%s's labels, err: %v", svc.Namespace, svc.Name, err)
-		}
-		r.installedSvcs.Add(sinfo)
-		return nil
 	}
-	if err := r.updateResourceExport(resName, ctx, req, &re, existResExport); err != nil {
+	if err = r.updateOrCreateResourceExport(resName, ctx, req, &re, existResExport); err != nil {
 		return err
+	}
+	// update Service's label with `antrea.io/multi-cluster` so we can watch Service's events via event mapping function.
+	svc.Labels[antreaMultiClusterServiceLabel] = "true"
+	if _, err := r.K8sClient.CoreV1().Services(svc.Namespace).Update(ctx, svc, metav1.UpdateOptions{}); err != nil {
+		klog.Infof("fail to update Service %s/%s's labels, err: %v", svc.Namespace, svc.Name, err)
 	}
 	r.installedSvcs.Add(sinfo)
 	return nil
@@ -398,18 +408,14 @@ func (r *ServiceExportReconciler) endpointsHandler(
 		if !apierrors.IsNotFound(err) {
 			return err
 		}
-		if err := r.createResourceExport(resName, ctx, req, &re); err != nil {
-			return err
-		}
-		r.installedEps.Add(epInfo)
-		return nil
 	}
-	if err := r.updateResourceExport(resName, ctx, req, &re, existResExport); err != nil {
+	if err = r.updateOrCreateResourceExport(resName, ctx, req, &re, existResExport); err != nil {
 		return err
 	}
 	r.installedEps.Add(epInfo)
 	return nil
 }
+
 func (r *ServiceExportReconciler) refreshResourceExport(resName, kind string,
 	svc *corev1.Service,
 	ep *corev1.Endpoints,
@@ -418,29 +424,67 @@ func (r *ServiceExportReconciler) refreshResourceExport(resName, kind string,
 	switch kind {
 	case ServiceKind:
 		re.ObjectMeta.Name = resName
-		re.Spec.Service = &mcsv1alpha1.ServiceExport{
-			ServiceSpec: svc.Spec,
+		newSvcSpec := svc.Spec.DeepCopy()
+		var renamedPorts []corev1.ServicePort
+		// rename port to port+protocol
+		for _, p := range svc.Spec.Ports {
+			p.Name = strconv.Itoa(int(p.Port)) + string(p.Protocol)
+			renamedPorts = append(renamedPorts, p)
 		}
+		newSvcSpec.Ports = renamedPorts
+		re.Spec.Service = &mcsv1alpha1.ServiceExport{
+			ServiceSpec: *newSvcSpec,
+		}
+		re.Labels["sourceKind"] = ServiceKind
 	case EndpointsKind:
 		re.ObjectMeta.Name = resName
-		re.Spec.Endpoints = &mcsv1alpha1.EndpointsExport{
-			Subsets: ep.Subsets,
+		if ep.Labels[SourceServiceType] == string(corev1.ServiceTypeNodePort) {
+			re.ObjectMeta.Labels[SourceServiceType] = string(corev1.ServiceTypeNodePort)
 		}
+		// wrap ready subset into ResourceExport only
+		var readySubset corev1.EndpointSubset
+		for _, s := range ep.Subsets {
+			if len(s.Addresses) > 0 {
+				readySubset = s
+			}
+		}
+		re.Spec.Endpoints = &mcsv1alpha1.EndpointsExport{
+			Subsets: []corev1.EndpointSubset{readySubset},
+		}
+		re.Labels["sourceKind"] = EndpointsKind
 	}
 	return *re
 }
 
-func (r *ServiceExportReconciler) updateResourceExport(resName string,
+func (r *ServiceExportReconciler) updateOrCreateResourceExport(resName string,
 	ctx context.Context,
 	req ctrl.Request,
 	newResExport *mcsv1alpha1.ResourceExport,
 	existResExport *mcsv1alpha1.ResourceExport) error {
-	newResExport.ObjectMeta.ResourceVersion = existResExport.ObjectMeta.ResourceVersion
-	_, err := r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Update(ctx, newResExport, metav1.UpdateOptions{})
-	if err != nil {
-		klog.Infof("fail to update ResourceExport %s/%s, err:%v", LeaderNameSpace, resName, err)
-		return err
+	createResExport := reflect.DeepEqual(*existResExport, v1alpha1.ResourceExport{})
+	if createResExport {
+		klog.Infof("creating ResourceExport %s/%s", LeaderNameSpace, resName)
+		_, err := r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Create(ctx, newResExport, metav1.CreateOptions{})
+		if err != nil {
+			klog.Errorf("fail to create ResourceExport %s/%s in leader cluster,err: %v", LeaderNameSpace, resName, err)
+			return err
+		}
+	} else {
+		newResExport.ObjectMeta.ResourceVersion = existResExport.ObjectMeta.ResourceVersion
+		_, err := r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Update(ctx, newResExport, metav1.UpdateOptions{})
+		if err != nil {
+			klog.Infof("fail to update ResourceExport %s/%s, err:%v", LeaderNameSpace, resName, err)
+			return err
+		}
 	}
+
+	var message string
+	if createResExport {
+		message = "creation is successful"
+	} else {
+		message = "update is successful"
+	}
+
 	// ignore status update failure?
 	latestResExport, err := r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Get(ctx, resName, metav1.GetOptions{})
 	if err != nil {
@@ -451,50 +495,13 @@ func (r *ServiceExportReconciler) updateResourceExport(resName string,
 		Type:               mcsv1alpha1.ResourceExportSucceeded,
 		Status:             corev1.ConditionTrue,
 		LastTransitionTime: metav1.NewTime(time.Now()),
-		Message:            "update is successful",
+		Message:            message,
 	}}
 	_, err = r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).UpdateStatus(ctx, latestResExport, metav1.UpdateOptions{})
 	if err != nil {
 		klog.Infof("fail to update ResourceExport's Status %s/%s,err:%v", LeaderNameSpace, resName, err)
 	}
 	return nil
-}
-
-func (r *ServiceExportReconciler) createResourceExport(resName string,
-	ctx context.Context,
-	req ctrl.Request,
-	re *mcsv1alpha1.ResourceExport) error {
-	klog.Infof("creating ResourceExport %s/%s", LeaderNameSpace, resName)
-	_, err := r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Create(ctx, re, metav1.CreateOptions{})
-	if err != nil {
-		klog.Errorf("fail to create ResourceExport %s/%s in leader cluster,err: %v", LeaderNameSpace, resName, err)
-		return err
-	}
-	// ignore status update failure?
-	re.Status.Conditions = []mcsv1alpha1.ResourceExportCondition{{
-		Type:               mcsv1alpha1.ResourceExportSucceeded,
-		Status:             corev1.ConditionTrue,
-		LastTransitionTime: metav1.NewTime(time.Now()),
-		Message:            "creation is successful",
-	}}
-	new, err := r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).Get(ctx, resName, metav1.GetOptions{})
-	if err != nil {
-		return nil
-	}
-	re.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
-	_, err = r.AntreamcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNameSpace).UpdateStatus(ctx, re, metav1.UpdateOptions{})
-	if err != nil {
-		klog.Infof("fail to update ResourceExport's Status %s/%s,err:%v", LeaderNameSpace, resName, err)
-	}
-	return nil
-}
-
-func getKey(req ctrl.Request) string {
-	return req.Namespace + req.Name
-}
-
-func getResourceExportName(resName, kind string) string {
-	return resName + "-" + strings.ToLower(kind)
 }
 
 func getEndPointsAddress(ep *corev1.Endpoints) []string {

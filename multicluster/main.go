@@ -226,11 +226,12 @@ func main() {
 		if err != nil {
 			klog.Fatalf("Error building Antrea MCS leader clientset: %s", err.Error())
 		}
-		if err = (&mcscontrollers.ResourceExportReconciler{
-			Client:             mgr.GetClient(),
-			Scheme:             mgr.GetScheme(),
-			AntreamcsCrdClient: antreamcsLocalCrdClient,
-		}).SetupWithManager(mgr); err != nil {
+		resExportReconciler := mcscontrollers.NewResourceExportReconciler(
+			mgr.GetClient(),
+			mgr.GetScheme(),
+			antreamcsLocalCrdClient,
+		)
+		if err = resExportReconciler.SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "ResourceExport")
 			os.Exit(1)
 		}

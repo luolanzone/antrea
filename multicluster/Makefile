@@ -63,7 +63,7 @@ test: manifests generate fmt vet ## Run tests.
 ##@ Build
 
 build: generate fmt vet ## Build manager binary.
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/antrea-multicluster-controller main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/antrea-multicluster-controller antrea.io/antrea/multicluster/cmd/...
 
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./main.go

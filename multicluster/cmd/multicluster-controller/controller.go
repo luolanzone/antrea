@@ -189,12 +189,15 @@ func run(o *Options) error {
 		setupLog.Error(err, "unable to create controller", "controller", "ResourceExport")
 		os.Exit(1)
 	}
-	if err = (&multiclustercontrollers.ResourceImportReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	resImportReconciler := multiclustercontrollers.NewResourceImportReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		localMgr,
+		remoteMgr,
+	)
+	if err = resImportReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ResourceImport")
-		return fmt.Errorf("unable to create ResourceImport controller, err: %v", err)
+		os.Exit(1)
 	}
 	if err = (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "ResourceImport")

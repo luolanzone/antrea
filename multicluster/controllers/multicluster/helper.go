@@ -13,6 +13,8 @@ limitations under the License.
 
 package multicluster
 
+import "k8s.io/apimachinery/pkg/types"
+
 const (
 	antreaMcsLabel    = "antrea.io/multi-cluster"
 	ServiceKind       = "Service"
@@ -25,6 +27,15 @@ const (
 	Separator = '/'
 )
 
+// TODO: Use NamespacedName stringer method instead of this. eg nsName.String()
 func NamespacedName(namespace, name string) string {
 	return namespace + string(Separator) + name
+}
+
+// GetNamespacedName returns the objects name as NamespacedName struct.
+func GetNamespacedName(namespace, name string) types.NamespacedName {
+	return types.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}
 }

@@ -137,6 +137,7 @@ func run(o *Options) error {
 		Scheme:   mgr.GetScheme(),
 		Log:      klogr.New().WithName("controllers"),
 		IsLeader: o.leader,
+		IsMember: o.member,
 	}
 	if err = clusterSetReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterSet")

@@ -133,7 +133,8 @@ func epIndexerByLabelFunc(obj interface{}) ([]string, error) {
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports/finalizers,verbs=update
-//+kubebuilder:rbac:groups="multicluster.x-k8s.io",resources=serviceexports,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceexports,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceexports/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
@@ -233,6 +234,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
+	// TODO: need to check and skip if ServiceExport is trying to export MCS Service/Endpoints
 	// check if corresponding service exists or not, if it's deleted
 	// then need to clean up ServiceExport
 	err := r.Client.Get(ctx, req.NamespacedName, svc)
@@ -511,9 +513,13 @@ func (r *ServiceExportReconciler) refreshResourceExport(resName, kind string,
 		re.ObjectMeta.Name = resName
 		newSvcSpec := svc.Spec.DeepCopy()
 		var renamedPorts []corev1.ServicePort
-		// rename port to protocol+port
+		// rename port to protocol+port and update service port to nodeport if it's NodePort type
+		isNodePortSvc := svc.Spec.Type == corev1.ServiceTypeNodePort
 		for _, p := range svc.Spec.Ports {
 			p.Name = strings.ToLower(string(p.Protocol)) + strconv.Itoa(int(p.Port))
+			if isNodePortSvc {
+				p.Port = p.NodePort
+			}
 			renamedPorts = append(renamedPorts, p)
 		}
 		newSvcSpec.Ports = renamedPorts

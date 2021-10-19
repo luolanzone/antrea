@@ -28,7 +28,6 @@ import (
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	k8smcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	multiclusterv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	"antrea.io/antrea/multicluster/controllers/multicluster/internal"
@@ -77,6 +76,8 @@ func NewResourceImportReconciler(client client.Client, scheme *runtime.Scheme, l
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=endpoints,verbs=get;list;watch;update;create;patch
+//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;update;create;patch
 
 // Reconcile will attempt to ensure that the imported Resource is installed in local cluster as per the
 // ResourceImport object.
@@ -101,16 +102,21 @@ func (r *ResourceImportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		klog.Infof("unable to fetch ResourceImport %s/%s, err: %v", req.Namespace, req.Name, err)
 		return ctrl.Result{}, err
 	}
+	// TODO: get ResourceImport from cache, otherwise, it is empty and unable to do Service and Endpoints clean up.
 	switch resImp.Spec.Kind {
-	case ServiceKind:
+	case ServiceImportKind:
 		if apierrors.IsNotFound(err) {
+			klog.Infof("unable to find ResourceImport %s/%s, err: %v", req.Namespace, req.Name, err)
 			return r.handleResImpDeleteForService(ctx, &resImp)
 		}
+		// TODO: skip status update
+		klog.Infof("start to update service according to ResourceImport %s/%s", req.Namespace, req.Name)
 		return r.handleResImpUpdateForService(ctx, &resImp)
 	case EndpointsKind:
 		if apierrors.IsNotFound(err) {
 			return r.handleResImpDeleteForEndpoints(ctx, &resImp)
 		}
+		// TODO: skip status update
 		return r.handleResImpUpdateForEndpoints(ctx, &resImp)
 	}
 	// TODO: handle for other ResImport Kinds
@@ -119,8 +125,7 @@ func (r *ResourceImportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 func (r *ResourceImportReconciler) handleResImpUpdateForService(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
 	klog.Infof("Updating Service corresponding to ResourceImport %s/%s", resImp.Namespace, resImp.Name)
-	svcImp := resImp.Spec.ServiceImport
-	svcName := GetNamespacedName(svcImp.GetNamespace(), svcImp.GetName())
+	svcName := GetNamespacedName(resImp.Spec.Namespace, resImp.Spec.Name)
 	svc := &corev1.Service{}
 	err := (*r.localClusterManager).Get(ctx, svcName, svc)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -128,11 +133,11 @@ func (r *ResourceImportReconciler) handleResImpUpdateForService(ctx context.Cont
 	}
 	if apierrors.IsNotFound(err) {
 		// Create MCS
-		mcsObj := getMCSForServiceImport(svcImp)
+		mcsObj := getMCSForServiceImport(resImp)
 		// TODO: Update internal cache
 		err := (*r.localClusterManager).Create(ctx, mcsObj, &client.CreateOptions{})
 		if err != nil {
-			klog.Error("fail to create ResourceImport %s/%s,err: %v", mcsObj.GetNamespace(), mcsObj.GetName(), err)
+			klog.Error("fail to create MCS Service %s/%s,err: %v", mcsObj.GetNamespace(), mcsObj.GetName(), err)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
@@ -150,7 +155,7 @@ func (r *ResourceImportReconciler) handleResImpDeleteForService(ctx context.Cont
 	if err != nil {
 		// TODO add some cleanup logic here
 		if apierrors.IsNotFound(err) {
-			// Service is already deleted. Nothing to do.
+			klog.Infof("Service %s is already deleted. Nothing to do.", svcName)
 			return ctrl.Result{}, nil
 		} else {
 			return ctrl.Result{}, err
@@ -161,7 +166,7 @@ func (r *ResourceImportReconciler) handleResImpDeleteForService(ctx context.Cont
 		klog.Errorf("failed to delete Multi-Cluster Service %s, err: %v", svcName.String(), err)
 		// TODO add some cleanup logic here
 		if apierrors.IsNotFound(err) {
-			// Service is already deleted. Nothing to do.
+			klog.Infof("Service %s is already deleted. Nothing to do.", svcName)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -170,10 +175,58 @@ func (r *ResourceImportReconciler) handleResImpDeleteForService(ctx context.Cont
 }
 
 func (r *ResourceImportReconciler) handleResImpUpdateForEndpoints(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
+	klog.Infof("Updating Endpoints corresponding to ResourceImport %s/%s", resImp.Namespace, resImp.Name)
+	epName := GetNamespacedName(resImp.Spec.Namespace, resImp.Spec.Name)
+	ep := &corev1.Endpoints{}
+	err := (*r.localClusterManager).Get(ctx, epName, ep)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+	if apierrors.IsNotFound(err) {
+		// Create MCS Endpoints
+		mcsEpObj := &corev1.Endpoints{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      resImp.Spec.Name,
+				Namespace: resImp.Spec.Namespace,
+			},
+			Subsets: resImp.Spec.Endpoints.Subsets,
+		}
+		// TODO: Update internal cache
+		err := (*r.localClusterManager).Create(ctx, mcsEpObj, &client.CreateOptions{})
+		if err != nil {
+			klog.Errorf("fail to create MCS Endpoints %s/%s,err: %v", mcsEpObj.GetNamespace(), mcsEpObj.GetName(), err)
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+	// Update MCS Endpoints logic here
 	return ctrl.Result{}, nil
 }
 
 func (r *ResourceImportReconciler) handleResImpDeleteForEndpoints(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
+	klog.Infof("Deleting Endpoints corresponding to ResourceImport %s/%s", resImp.Namespace, resImp.Name)
+	epName := GetNamespacedName(resImp.Spec.Namespace, resImp.Spec.Name)
+	ep := &corev1.Endpoints{}
+	err := (*r.localClusterManager).Get(ctx, epName, ep)
+	if err != nil {
+		// TODO add some cleanup logic here
+		if apierrors.IsNotFound(err) {
+			klog.Infof("Endpoints %s is already deleted. Nothing to do.", epName)
+			return ctrl.Result{}, nil
+		} else {
+			return ctrl.Result{}, err
+		}
+	}
+	err = (*r.localClusterManager).Delete(ctx, ep, &client.DeleteOptions{})
+	if err != nil {
+		klog.Errorf("failed to delete Multi-Cluster Endpoints %s, err: %v", epName.String(), err)
+		// TODO add some cleanup logic here
+		if apierrors.IsNotFound(err) {
+			klog.Infof("Endpoints %s is already deleted. Nothing to do.", epName)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -190,10 +243,10 @@ func (r *ResourceImportReconciler) getRemoteCluster() (internal.RemoteCluster, e
 	return remoteCluster, nil
 }
 
-func getMCSForServiceImport(svcImp *k8smcsv1a1.ServiceImport) *corev1.Service {
+func getMCSForServiceImport(resImp *multiclusterv1alpha1.ResourceImport) *corev1.Service {
 	svcPort := int32(0)
 	protocol := corev1.ProtocolTCP
-	for _, p := range svcImp.Spec.Ports {
+	for _, p := range resImp.Spec.ServiceImport.Spec.Ports {
 		if p.Port > 0 {
 			svcPort = p.Port
 			protocol = p.Protocol
@@ -202,8 +255,8 @@ func getMCSForServiceImport(svcImp *k8smcsv1a1.ServiceImport) *corev1.Service {
 	}
 	mcs := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcImp.Name,
-			Namespace: svcImp.Namespace,
+			Name:      resImp.Spec.Name,
+			Namespace: resImp.Spec.Namespace,
 			// Add necessary labels and annotations
 		},
 		TypeMeta: metav1.TypeMeta{

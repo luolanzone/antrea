@@ -45,6 +45,7 @@ type ClusterSetReconciler struct {
 	Scheme   *runtime.Scheme
 	Log      logr.Logger
 	IsLeader bool
+	IsMember bool
 
 	clusterSetConfig *multiclusterv1alpha1.ClusterSet
 	clusterSetID     common.ClusterSetID
@@ -98,12 +99,22 @@ func (r *ClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// if update,
 	//    if leader - nothing to do in inbound mode
 	//    if member - if leaders have changed handle accordingly, else nothing to do.
-	if !r.IsLeader {
+	if r.IsLeader && r.IsMember {
 		err = r.updateMultiClusterSetOnMemberCluster(clusterSet)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-	} else {
+		r.createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet)
+	}
+
+	if !r.IsLeader && r.IsMember {
+		err = r.updateMultiClusterSetOnMemberCluster(clusterSet)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if r.IsLeader && !r.IsMember {
 		r.createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet)
 	}
 

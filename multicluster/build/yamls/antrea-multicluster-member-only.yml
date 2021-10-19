@@ -1387,8 +1387,10 @@ rules:
   resources:
   - endpoints
   verbs:
+  - create
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -1404,8 +1406,10 @@ rules:
   resources:
   - services
   verbs:
+  - create
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -1602,6 +1606,14 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - multicluster.x-k8s.io
+  resources:
+  - serviceexports/status
+  verbs:
+  - get
+  - patch
+  - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

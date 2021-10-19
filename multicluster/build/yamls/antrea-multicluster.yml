@@ -1387,8 +1387,11 @@ rules:
   resources:
   - endpoints
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -1404,8 +1407,11 @@ rules:
   resources:
   - services
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -1602,6 +1608,14 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - multicluster.x-k8s.io
+  resources:
+  - serviceexports/status
+  verbs:
+  - get
+  - patch
+  - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -1687,6 +1701,7 @@ data:
       bindAddress: 127.0.0.1:8080
     webhook:
       port: 9443
+    webhookServer: true
     leaderElection:
       leaderElect: true
       resourceName: 6536456a.crd.antrea.io

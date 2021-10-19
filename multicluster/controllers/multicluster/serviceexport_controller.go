@@ -26,6 +26,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -133,7 +134,8 @@ func epIndexerByLabelFunc(obj interface{}) ([]string, error) {
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports/finalizers,verbs=update
-//+kubebuilder:rbac:groups="multicluster.x-k8s.io",resources=serviceexports,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceexports,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceexports/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=get;list;watch;update
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
@@ -186,6 +188,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
+		// TODO: clean up ServiceExport if exported service is deleted.
 		// cleanup labels of Service so we don't watch service event anymore
 		err := r.Client.Get(ctx, req.NamespacedName, svc)
 		if err == nil {
@@ -233,6 +236,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
+	// TODO: need to check and skip if ServiceExport is trying to export MCS Service/Endpoints
 	// check if corresponding service exists or not, if it's deleted
 	// then need to clean up ServiceExport
 	err := r.Client.Get(ctx, req.NamespacedName, svc)
@@ -284,8 +288,8 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var svcNoChange, epNoChange bool
 	if svcInstalled {
 		installedSvc := svcObj.(*svcInfo)
-		if reflect.DeepEqual(svc.Spec.Ports, installedSvc.ports) &&
-			reflect.DeepEqual(svc.Spec.ClusterIPs, installedSvc.clusterIPs) {
+		if apiequality.Semantic.DeepEqual(svc.Spec.Ports, installedSvc.ports) &&
+			apiequality.Semantic.DeepEqual(svc.Spec.ClusterIPs, installedSvc.clusterIPs) {
 			klog.Infof("Service %s/%s has been converted into ResourceExport %s/%s and no change, skip it", svc.Namespace, svc.Name, leaderNamespace, svcResExportName)
 			svcNoChange = true
 		}
@@ -343,8 +347,8 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if epInstalled {
 		installedEp := epObj.(*epInfo)
-		if reflect.DeepEqual(getEndPointsPorts(ep), installedEp.ports) &&
-			reflect.DeepEqual(getEndPointsAddress(ep), installedEp.addressIPs) {
+		if apiequality.Semantic.DeepEqual(getEndPointsPorts(ep), installedEp.ports) &&
+			apiequality.Semantic.DeepEqual(getEndPointsAddress(ep), installedEp.addressIPs) {
 			klog.Infof("Endpoints %s/%s has been converted into ResourceExport %s/%s and no change, skip it", ep.Namespace, ep.Name, leaderNamespace, epResExportName)
 			epNoChange = true
 		}
@@ -511,9 +515,13 @@ func (r *ServiceExportReconciler) refreshResourceExport(resName, kind string,
 		re.ObjectMeta.Name = resName
 		newSvcSpec := svc.Spec.DeepCopy()
 		var renamedPorts []corev1.ServicePort
-		// rename port to protocol+port
+		// rename port to protocol+port and update service port to nodeport if it's NodePort type
+		isNodePortSvc := svc.Spec.Type == corev1.ServiceTypeNodePort
 		for _, p := range svc.Spec.Ports {
 			p.Name = strings.ToLower(string(p.Protocol)) + strconv.Itoa(int(p.Port))
+			if isNodePortSvc {
+				p.Port = p.NodePort
+			}
 			renamedPorts = append(renamedPorts, p)
 		}
 		newSvcSpec.Ports = renamedPorts

@@ -31,6 +31,7 @@ type Options struct {
 	configFile     string
 	SelfSignedCert bool
 	options        ctrl.Options
+	webhookServer  bool
 	leader         bool
 	member         bool
 }
@@ -73,6 +74,10 @@ func (o *Options) complete(args []string) error {
 		o.member = ctrlConfig.Member
 		if o.member {
 			klog.Info("Running as Member Cluster of ClusterSet")
+		}
+		o.webhookServer = ctrlConfig.WebhookServer
+		if o.webhookServer {
+			klog.Info("Running as MCS Webhook Server")
 		}
 		return nil
 	}

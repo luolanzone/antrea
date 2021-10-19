@@ -6,6 +6,7 @@ metrics:
   bindAddress: 127.0.0.1:8080
 webhook:
   port: 9443
+webhookServer: false
 leaderElection:
   leaderElect: true
   resourceName: 6536456a.crd.antrea.io

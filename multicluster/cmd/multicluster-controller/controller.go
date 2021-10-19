@@ -40,14 +40,13 @@ import (
 	multiclusterv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	multiclustercontrollers "antrea.io/antrea/multicluster/controllers/multicluster"
 	"antrea.io/antrea/pkg/apiserver/certificate"
-	"antrea.io/antrea/pkg/util/env"
 	// +kubebuilder:scaffold:imports
 )
 
 var (
-	setupLog                      = ctrl.Log.WithName("setup")
-	validationWebhooksNamePattern = "antrea-multicluster-%s%svalidating-webhook-configuration"
-	mutationWebhooksNamePattern   = "antrea-multicluster-%s%smutating-webhook-configuration"
+	setupLog           = ctrl.Log.WithName("setup")
+	validationWebhooks = []string{"antrea-multicluster-validating-webhook-configuration"}
+	mutationWebhooks   = []string{"antrea-multicluster-mutating-webhook-configuration"}
 )
 
 const (
@@ -64,21 +63,6 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
-func getValidationWebhooks(isLeader bool) []string {
-	if isLeader {
-		return []string{fmt.Sprintf(validationWebhooksNamePattern, env.GetPodNamespace(), "-")}
-	}
-	return []string{fmt.Sprintf(validationWebhooksNamePattern, "", "")}
-}
-
-func getMutationWebhooks(isLeader bool) []string {
-	if isLeader {
-		return []string{fmt.Sprintf(mutationWebhooksNamePattern, env.GetPodNamespace(), "-")}
-	}
-	return []string{fmt.Sprintf(mutationWebhooksNamePattern, "", "")}
-
-}
-
 func run(o *Options) error {
 	opts := zap.Options{
 		Development: true,
@@ -93,7 +77,7 @@ func run(o *Options) error {
 	}
 
 	secureServing := genericoptions.NewSecureServingOptions().WithLoopback()
-	caCertController, err := certificate.ApplyServerCert(o.SelfSignedCert, client, aggregatorClient, apiExtensionClient, secureServing, getCAConifg(o.leader))
+	caCertController, err := certificate.ApplyServerCert(o.SelfSignedCert, client, aggregatorClient, apiExtensionClient, secureServing, getCAConifg())
 	if err != nil {
 		return fmt.Errorf("error applying server cert: %v", err)
 	}
@@ -106,11 +90,7 @@ func run(o *Options) error {
 	} else {
 		o.options.CertDir = certDir
 	}
-	// TODO: These leader checks should go once we have a separate command for leader and member controller
-	if o.leader {
-		// on the leader we want the reconciler to run for a given namspace instead of cluster scope
-		o.options.Namespace = env.GetPodNamespace()
-	}
+
 	mgr, err := ctrl.NewManager(k8sConfig, o.options)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -137,6 +117,7 @@ func run(o *Options) error {
 		Scheme:   mgr.GetScheme(),
 		Log:      klogr.New().WithName("controllers"),
 		IsLeader: o.leader,
+		IsMember: o.member,
 	}
 	if err = clusterSetReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterSet")
@@ -144,7 +125,6 @@ func run(o *Options) error {
 	}
 
 	remoteMgr := &(clusterSetReconciler.RemoteClusterManager)
-	localMgr := &(clusterSetReconciler.LocalClusterManager)
 	svcExportReconciler := multiclustercontrollers.NewServiceExportReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
@@ -168,22 +148,10 @@ func run(o *Options) error {
 		setupLog.Error(err, "unable to create controller", "controller", "ResourceImportFilter")
 		return fmt.Errorf("unable to create ResourceImportFilter controller, err: %v", err)
 	}
-	if err = (&multiclusterv1alpha1.ClusterClaim{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ClusterClaim")
-		return fmt.Errorf("unable to create ClusterClaim webhook, err: %v", err)
-	}
-	if err = (&multiclusterv1alpha1.ClusterSet{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ClusterSet")
-		return fmt.Errorf("unable to create ClusterSet webhook, err: %v", err)
-	}
-	if err = (&multiclusterv1alpha1.MemberClusterAnnounce{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "MemberClusterAnnounce")
-		return fmt.Errorf("unable to create MemberClusterAnnounce webhook, err: %v", err)
-	}
+
 	resExportReconciler := multiclustercontrollers.NewResourceExportReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
-		localMgr,
 	)
 	if err = resExportReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ResourceExport")
@@ -192,21 +160,37 @@ func run(o *Options) error {
 	resImportReconciler := multiclustercontrollers.NewResourceImportReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
-		localMgr,
 		remoteMgr,
 	)
 	if err = resImportReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ResourceImport")
 		os.Exit(1)
 	}
-	if err = (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ResourceImport")
-		return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
+
+	if o.webhookServer {
+		if err = (&multiclusterv1alpha1.MemberClusterAnnounce{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "MemberClusterAnnounce")
+			return fmt.Errorf("unable to create MemberClusterAnnounce webhook, err: %v", err)
+		}
+		if err = (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ResourceImport")
+			return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
+		}
+		if err = (&multiclusterv1alpha1.ResourceExport{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ResourceExport")
+			return fmt.Errorf("unable to create ResourceExport webhook, err: %v", err)
+		}
+
+		if err = (&multiclusterv1alpha1.ClusterClaim{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ClusterClaim")
+			return fmt.Errorf("unable to create ClusterClaim webhook, err: %v", err)
+		}
+		if err = (&multiclusterv1alpha1.ClusterSet{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ClusterSet")
+			return fmt.Errorf("unable to create ClusterSet webhook, err: %v", err)
+		}
 	}
-	if err = (&multiclusterv1alpha1.ResourceExport{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ResourceExport")
-		return fmt.Errorf("unable to create ResourceExport webhook, err: %v", err)
-	}
+
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -246,7 +230,7 @@ func createClients(kubeConfig *rest.Config) (
 	return client, aggregatorClient, apiExtensionClient, nil
 }
 
-func getCAConifg(isLeader bool) certificate.CAConfig {
+func getCAConifg() certificate.CAConfig {
 	return certificate.CAConfig{
 		CAConfigMapName: configMapName,
 		// the key pair name has to be "tls" https://github.com/kubernetes-sigs/controller-runtime/blob/master/pkg/manager/manager.go#L221
@@ -255,8 +239,8 @@ func getCAConifg(isLeader bool) certificate.CAConfig {
 		AntreaServiceName:          serviceName,
 		SelfSignedCertDir:          selfSignedCertDir,
 		APIServiceNames:            []string{},
-		MutationWebhooks:           getMutationWebhooks(isLeader),
-		ValidatingWebhooks:         getValidationWebhooks(isLeader),
+		MutationWebhooks:           mutationWebhooks,
+		ValidatingWebhooks:         validationWebhooks,
 		OptionalMutationWebhooks:   []string{},
 		CrdsWithConversionWebhooks: []string{},
 		CertReadyTimeout:           2 * time.Minute,

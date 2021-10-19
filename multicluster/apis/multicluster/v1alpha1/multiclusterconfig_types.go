@@ -28,6 +28,8 @@ type MultiClusterConfig struct {
 	metav1.TypeMeta `json:",inline"`
 	// ControllerManagerConfigurationSpec returns the contfigurations for controllers
 	config.ControllerManagerConfigurationSpec `json:",inline"`
+	// WebhookServer enable webhook registration
+	WebhookServer bool `json:"webhookServer,omitempty"`
 	// Leader is a role of ClusterSet member cluster
 	Leader bool `json:"leader,omitempty"`
 	// Member is a role of ClusterSet member cluster

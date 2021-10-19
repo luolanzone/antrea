@@ -11,8 +11,11 @@ rules:
   resources:
   - endpoints
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -28,8 +31,11 @@ rules:
   resources:
   - services
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:
@@ -226,3 +232,11 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - multicluster.x-k8s.io
+  resources:
+  - serviceexports/status
+  verbs:
+  - get
+  - patch
+  - update

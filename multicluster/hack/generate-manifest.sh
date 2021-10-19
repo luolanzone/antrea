@@ -20,10 +20,11 @@ function echoerr {
     >&2 echo "$@"
 }
 
-_usage="Usage: $0 [--leader] [--member] [--help|-h]
+_usage="Usage: $0 [--leader] [--member] [--webhook] [--help|-h]
 Generate a YAML manifest for Antrea MultiCluster using Kustomize and print it to stdout.
         --leader                       Generate a manifest for a Cluster as leader in a ClusterSet
         --member                       Generate a manifest for a Cluster as member in a ClusterSet
+        --webhook                      Generate a manifest for a Cluster with webhook enabled
         --help, -h                     Print this message and exit
 
 This tool uses kustomize (https://github.com/kubernetes-sigs/kustomize) to generate manifests for
@@ -39,8 +40,9 @@ function print_help {
 
 LEADER=false
 MEMBER=false
+WEBHOOKSERVER=false
 
-while getopts lmhu flag
+while getopts lmwhu flag
 do
     case "${flag}" in
         l) 
@@ -48,6 +50,9 @@ do
           ;;
         m) 
           MEMBER=true
+          ;;
+        w)
+          WEBHOOKSERVER=true
           ;;
         h) 
           print_help
@@ -85,6 +90,10 @@ fi
 
 if [ "$LEADER" ==  false ] && [ "$MEMBER" == true ]; then
     sed -i.bak -E "s/member: false/member: true/" controller_manager_config.yaml
+fi
+
+if [ "$WEBHOOKSERVER" == true ];then
+    sed -i.bak -E "s/webhookServer: false/webhookServer: true/" controller_manager_config.yaml
 fi
 
 cp $KUSTOMIZATION_DIR/default/configmap/kustomization.yaml kustomization.yaml

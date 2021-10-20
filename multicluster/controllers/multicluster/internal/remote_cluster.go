@@ -1,10 +1,8 @@
 package internal
 
 import (
-	multiclustercontrollers "antrea.io/antrea/multicluster/controllers/multicluster"
 	"context"
 	"fmt"
-	"k8s.io/klog/v2"
 	"sync"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -189,9 +188,6 @@ func SetSecretClient(client client.Client) {
 }
 
 func (r *remoteCluster) SendMemberAnnounce() error {
-	// TODO: remove this before merge to feature branch to avoid spamming logs
-	r.log.Info("Writing member announce")
-
 	memberAnnounceList := &multiclusterv1alpha1.MemberClusterAnnounceList{}
 	if err := r.List(context.TODO(), memberAnnounceList, client.InNamespace(r.GetNamespace())); err != nil {
 		return err
@@ -283,6 +279,7 @@ func (r *remoteCluster) Start() (context.CancelFunc, error) {
 	stopCtx, stopFunc := context.WithCancel(context.Background())
 
 	// Start a Timer for every 5 seconds
+	// TODO: make the internal longer? the webhook API is called every 5s to remote cluster now
 	ticker := time.NewTicker(5 * time.Second)
 
 	go func() {
@@ -323,25 +320,24 @@ func (r *remoteCluster) IsConnected() bool {
 }
 
 func (r *remoteCluster) StartMonitoring() error {
-	klog.V(2).Info("Starting monitoring for resourceimports from", "remoteCluster", r.ClusterID)
+	klog.V(2).InfoS("Starting monitoring for ResourceImports from", "remoteCluster", r.ClusterID)
 
-	resImportReconciler := multiclustercontrollers.NewResourceImportReconciler(
+	resImportReconciler := NewResourceImportReconciler(
 		r.ClusterManager.GetClient(),
 		r.ClusterManager.GetScheme(),
 		r.localClusterManager,
 		r,
 	)
 	if err := resImportReconciler.SetupWithManager(r.ClusterManager); err != nil {
-		klog.V(2).Error(err, "unable to create controller", "controller", "ResourceImport")
-		return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
-	}
-	if err := (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(r.ClusterManager); err != nil {
-		klog.V(2).Error(err, "unable to create webhook", "webhook", "ResourceImport")
-		return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
+		klog.V(2).ErrorS(err, "unable to create controller", "controller", "ResourceImport")
+		return fmt.Errorf("unable to create ResourceImport controller, err: %v", err)
 	}
 
 	go func() {
-		r.ClusterManager.Start(context.TODO())
+		err := r.ClusterManager.Start(context.TODO())
+		if err != nil {
+			klog.ErrorS(err, "unable to start remote cluster manager", "remoteCluster", r.ClusterID)
+		}
 	}()
 	// TODO: We need to stop it once this remote cluster is no longer the leader.
 	// But for demo, we have only one leader cluster, so come back to this later

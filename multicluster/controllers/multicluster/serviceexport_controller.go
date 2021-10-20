@@ -26,6 +26,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +41,7 @@ import (
 	k8smcsv1alpha1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
+	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 	"antrea.io/antrea/multicluster/controllers/multicluster/internal"
 )
 
@@ -102,7 +104,7 @@ func NewServiceExportReconciler(
 
 func svcInfoKeyFunc(obj interface{}) (string, error) {
 	svc := obj.(*svcInfo)
-	return NamespacedName(svc.namespace, svc.name), nil
+	return common.NamespacedName(svc.namespace, svc.name), nil
 }
 
 func svcIndexerByTypeFunc(obj interface{}) ([]string, error) {
@@ -111,7 +113,7 @@ func svcIndexerByTypeFunc(obj interface{}) ([]string, error) {
 
 func epInfoKeyFunc(obj interface{}) (string, error) {
 	ep := obj.(*epInfo)
-	return NamespacedName(ep.namespace, ep.name), nil
+	return common.NamespacedName(ep.namespace, ep.name), nil
 }
 
 func epIndexerByLabelFunc(obj interface{}) ([]string, error) {
@@ -156,12 +158,12 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	var svcExport k8smcsv1alpha1.ServiceExport
-	key := NamespacedName(req.Namespace, req.Name)
+	key := common.NamespacedName(req.Namespace, req.Name)
 	svcObj, svcInstalled, _ := r.installedSvcs.GetByKey(key)
 	epObj, epInstalled, _ := r.installedEps.GetByKey(key)
 	resExportBaseName := clusterID + "-" + req.Namespace + "-" + req.Name
-	svcResExportName := resExportBaseName + "-" + strings.ToLower(ServiceKind)
-	epResExportName := resExportBaseName + "-" + strings.ToLower(EndpointsKind)
+	svcResExportName := resExportBaseName + "-" + strings.ToLower(common.ServiceKind)
+	epResExportName := resExportBaseName + "-" + strings.ToLower(common.EndpointsKind)
 
 	remoteClusters := (*r.remoteClusterManager).GetRemoteClusters()
 	if len(remoteClusters) <= 0 {
@@ -187,10 +189,11 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
+		// TODO: clean up ServiceExport if exported service is deleted.
 		// cleanup labels of Service so we don't watch service event anymore
 		err := r.Client.Get(ctx, req.NamespacedName, svc)
 		if err == nil {
-			delete(svc.Labels, antreaMcsLabel)
+			delete(svc.Labels, common.AntreaMcsLabel)
 			// ignore error since the service event will be triggered again, then here we can delete in another time.
 			_ = r.Client.Update(ctx, svc)
 		} else {
@@ -286,8 +289,8 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var svcNoChange, epNoChange bool
 	if svcInstalled {
 		installedSvc := svcObj.(*svcInfo)
-		if reflect.DeepEqual(svc.Spec.Ports, installedSvc.ports) &&
-			reflect.DeepEqual(svc.Spec.ClusterIPs, installedSvc.clusterIPs) {
+		if apiequality.Semantic.DeepEqual(svc.Spec.Ports, installedSvc.ports) &&
+			apiequality.Semantic.DeepEqual(svc.Spec.ClusterIPs, installedSvc.clusterIPs) {
 			klog.Infof("Service %s/%s has been converted into ResourceExport %s/%s and no change, skip it", svc.Namespace, svc.Name, leaderNamespace, svcResExportName)
 			svcNoChange = true
 		}
@@ -298,7 +301,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			Name:      svc.Name,
 			Namespace: svc.Namespace,
 			Labels: map[string]string{
-				SourceServiceType: string(corev1.ServiceTypeNodePort),
+				common.SourceServiceType: string(corev1.ServiceTypeNodePort),
 			},
 		},
 	}
@@ -345,8 +348,8 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if epInstalled {
 		installedEp := epObj.(*epInfo)
-		if reflect.DeepEqual(getEndPointsPorts(ep), installedEp.ports) &&
-			reflect.DeepEqual(getEndPointsAddress(ep), installedEp.addressIPs) {
+		if apiequality.Semantic.DeepEqual(getEndPointsPorts(ep), installedEp.ports) &&
+			apiequality.Semantic.DeepEqual(getEndPointsAddress(ep), installedEp.addressIPs) {
 			klog.Infof("Endpoints %s/%s has been converted into ResourceExport %s/%s and no change, skip it", ep.Namespace, ep.Name, leaderNamespace, epResExportName)
 			epNoChange = true
 		}
@@ -397,7 +400,7 @@ func (r *ServiceExportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&k8smcsv1alpha1.ServiceExport{}).
 		Watches(&source.Kind{Type: &corev1.Service{}}, handler.EnqueueRequestsFromMapFunc(func(a client.Object) []reconcile.Request {
-			if _, ok := a.(*corev1.Service).Labels[antreaMcsLabel]; ok {
+			if _, ok := a.(*corev1.Service).Labels[common.AntreaMcsLabel]; ok {
 				// events mapping from Service to ServiceExport
 				return []reconcile.Request{
 					{
@@ -411,7 +414,7 @@ func (r *ServiceExportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return nil
 		})).
 		Watches(&source.Kind{Type: &corev1.Endpoints{}}, handler.EnqueueRequestsFromMapFunc(func(a client.Object) []reconcile.Request {
-			if _, ok := a.(*corev1.Endpoints).Labels[antreaMcsLabel]; ok {
+			if _, ok := a.(*corev1.Endpoints).Labels[common.AntreaMcsLabel]; ok {
 				// events mapping from Endpoints to ServiceExport
 				return []reconcile.Request{
 					{
@@ -437,7 +440,7 @@ func (r *ServiceExportReconciler) serviceHandler(
 	resName string,
 	re mcsv1alpha1.ResourceExport,
 	rc internal.RemoteCluster) error {
-	kind := ServiceKind
+	kind := common.ServiceKind
 	sinfo := &svcInfo{
 		name:       svc.Name,
 		namespace:  svc.Namespace,
@@ -458,9 +461,9 @@ func (r *ServiceExportReconciler) serviceHandler(
 		return err
 	}
 	if svc.Labels != nil {
-		svc.Labels[antreaMcsLabel] = "true"
+		svc.Labels[common.AntreaMcsLabel] = "true"
 	} else {
-		svc.Labels = map[string]string{antreaMcsLabel: "true"}
+		svc.Labels = map[string]string{common.AntreaMcsLabel: "true"}
 	}
 	// update Service's label with `antrea.io/multi-cluster` so we can watch Service's events via event mapping function.
 	if err := r.Client.Update(ctx, svc); err != nil {
@@ -479,7 +482,7 @@ func (r *ServiceExportReconciler) endpointsHandler(
 	resName string,
 	re mcsv1alpha1.ResourceExport,
 	rc internal.RemoteCluster) error {
-	kind := EndpointsKind
+	kind := common.EndpointsKind
 	epInfo := &epInfo{
 		name:       ep.Name,
 		namespace:  ep.Namespace,
@@ -509,7 +512,7 @@ func (r *ServiceExportReconciler) refreshResourceExport(resName, kind string,
 	re *mcsv1alpha1.ResourceExport) mcsv1alpha1.ResourceExport {
 	re.Spec.Kind = kind
 	switch kind {
-	case ServiceKind:
+	case common.ServiceKind:
 		re.ObjectMeta.Name = resName
 		newSvcSpec := svc.Spec.DeepCopy()
 		var renamedPorts []corev1.ServicePort
@@ -526,16 +529,16 @@ func (r *ServiceExportReconciler) refreshResourceExport(resName, kind string,
 		re.Spec.Service = &mcsv1alpha1.ServiceExport{
 			ServiceSpec: *newSvcSpec,
 		}
-		re.Labels["sourceKind"] = ServiceKind
-	case EndpointsKind:
+		re.Labels["sourceKind"] = common.ServiceKind
+	case common.EndpointsKind:
 		re.ObjectMeta.Name = resName
-		if ep.Labels[SourceServiceType] == string(corev1.ServiceTypeNodePort) {
-			re.ObjectMeta.Labels[SourceServiceType] = string(corev1.ServiceTypeNodePort)
+		if ep.Labels[common.SourceServiceType] == string(corev1.ServiceTypeNodePort) {
+			re.ObjectMeta.Labels[common.SourceServiceType] = string(corev1.ServiceTypeNodePort)
 		}
 		re.Spec.Endpoints = &mcsv1alpha1.EndpointsExport{
 			Subsets: ep.Subsets,
 		}
-		re.Labels["sourceKind"] = EndpointsKind
+		re.Labels["sourceKind"] = common.EndpointsKind
 	}
 	return *re
 }

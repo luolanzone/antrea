@@ -99,22 +99,16 @@ func (r *ClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// if update,
 	//    if leader - nothing to do in inbound mode
 	//    if member - if leaders have changed handle accordingly, else nothing to do.
-	if r.IsLeader && r.IsMember {
-		err = r.updateMultiClusterSetOnMemberCluster(clusterSet)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		r.createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet)
-	}
 
-	if !r.IsLeader && r.IsMember {
-		err = r.updateMultiClusterSetOnMemberCluster(clusterSet)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
-
+	// skip creating remote cluster manager in leader only cluster for inbound mode.
+	// otherwise, we need initilize both LocalClusterManager and RemoteClusterManager
 	if r.IsLeader && !r.IsMember {
+		r.createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet)
+	} else {
+		err = r.updateMultiClusterSetOnMemberCluster(clusterSet)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 		r.createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet)
 	}
 
@@ -199,6 +193,7 @@ func (r *ClusterSetReconciler) validateLocalClusterClaim(clusterSet *multicluste
 	return nil
 }
 
+// TODO: need a more proper name since we will initialize LocalClusterManager in member cluster as well.
 func (r *ClusterSetReconciler) createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet *multiclusterv1alpha1.ClusterSet) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

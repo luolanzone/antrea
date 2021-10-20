@@ -45,9 +45,9 @@ import (
 )
 
 var (
-	setupLog                      = ctrl.Log.WithName("setup")
-	validationWebhooksNamePattern = "antrea-multicluster-%s%svalidating-webhook-configuration"
-	mutationWebhooksNamePattern   = "antrea-multicluster-%s%smutating-webhook-configuration"
+	setupLog           = ctrl.Log.WithName("setup")
+	validationWebhooks = []string{"antrea-multicluster-validating-webhook-configuration"}
+	mutationWebhooks   = []string{"antrea-multicluster-mutating-webhook-configuration"}
 )
 
 const (
@@ -64,21 +64,6 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
-func getValidationWebhooks(isLeader bool) []string {
-	if isLeader {
-		return []string{fmt.Sprintf(validationWebhooksNamePattern, env.GetPodNamespace(), "-")}
-	}
-	return []string{fmt.Sprintf(validationWebhooksNamePattern, "", "")}
-}
-
-func getMutationWebhooks(isLeader bool) []string {
-	if isLeader {
-		return []string{fmt.Sprintf(mutationWebhooksNamePattern, env.GetPodNamespace(), "-")}
-	}
-	return []string{fmt.Sprintf(mutationWebhooksNamePattern, "", "")}
-
-}
-
 func run(o *Options) error {
 	opts := zap.Options{
 		Development: true,
@@ -93,7 +78,7 @@ func run(o *Options) error {
 	}
 
 	secureServing := genericoptions.NewSecureServingOptions().WithLoopback()
-	caCertController, err := certificate.ApplyServerCert(o.SelfSignedCert, client, aggregatorClient, apiExtensionClient, secureServing, getCAConifg(o.leader))
+	caCertController, err := certificate.ApplyServerCert(o.SelfSignedCert, client, aggregatorClient, apiExtensionClient, secureServing, getCAConifg())
 	if err != nil {
 		return fmt.Errorf("error applying server cert: %v", err)
 	}
@@ -158,14 +143,11 @@ func run(o *Options) error {
 	}
 
 	remoteMgr := &(clusterSetReconciler.RemoteClusterManager)
-	localMgr := &(clusterSetReconciler.LocalClusterManager)
-
 	if o.leader {
 		// Only leader runs the export resource reconciler
 		resExportReconciler := multiclustercontrollers.NewResourceExportReconciler(
 			mgr.GetClient(),
 			mgr.GetScheme(),
-			localMgr,
 		)
 		if err = resExportReconciler.SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "ResourceExport")
@@ -174,6 +156,11 @@ func run(o *Options) error {
 		if err = (&multiclusterv1alpha1.ResourceExport{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "ResourceExport")
 			return fmt.Errorf("unable to create ResourceExport webhook, err: %v", err)
+		}
+
+		if err = (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ResourceImport")
+			return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
 		}
 
 		// Only leader runs the export resource filter reconciler
@@ -208,10 +195,6 @@ func run(o *Options) error {
 		//if err = resImportReconciler.SetupWithManager(mgr); err != nil {
 		//	setupLog.Error(err, "unable to create controller", "controller", "ResourceImport")
 		//	os.Exit(1)
-		//}
-		//if err = (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(mgr); err != nil {
-		//	setupLog.Error(err, "unable to create webhook", "webhook", "ResourceImport")
-		//	return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
 		//}
 
 		// Import resource filter reconciler is only run on the member cluster
@@ -263,7 +246,7 @@ func createClients(kubeConfig *rest.Config) (
 	return client, aggregatorClient, apiExtensionClient, nil
 }
 
-func getCAConifg(isLeader bool) certificate.CAConfig {
+func getCAConifg() certificate.CAConfig {
 	return certificate.CAConfig{
 		CAConfigMapName: configMapName,
 		// the key pair name has to be "tls" https://github.com/kubernetes-sigs/controller-runtime/blob/master/pkg/manager/manager.go#L221
@@ -272,8 +255,8 @@ func getCAConifg(isLeader bool) certificate.CAConfig {
 		AntreaServiceName:          serviceName,
 		SelfSignedCertDir:          selfSignedCertDir,
 		APIServiceNames:            []string{},
-		MutationWebhooks:           getMutationWebhooks(isLeader),
-		ValidatingWebhooks:         getValidationWebhooks(isLeader),
+		MutationWebhooks:           mutationWebhooks,
+		ValidatingWebhooks:         validationWebhooks,
 		OptionalMutationWebhooks:   []string{},
 		CrdsWithConversionWebhooks: []string{},
 		CertReadyTimeout:           2 * time.Minute,

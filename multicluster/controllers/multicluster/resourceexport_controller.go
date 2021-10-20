@@ -18,7 +18,6 @@ package multicluster
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,7 +37,7 @@ import (
 	mcs "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
-	"antrea.io/antrea/multicluster/controllers/multicluster/internal"
+	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 )
 
 type (
@@ -46,7 +45,6 @@ type (
 	ResourceExportReconciler struct {
 		Client              client.Client
 		Scheme              *runtime.Scheme
-		localClusterManager *internal.LocalClusterManager
 		installedResExports cache.Indexer
 	}
 )
@@ -58,12 +56,10 @@ const (
 
 func NewResourceExportReconciler(
 	Client client.Client,
-	Scheme *runtime.Scheme,
-	localClusterManager *internal.LocalClusterManager) *ResourceExportReconciler {
+	Scheme *runtime.Scheme) *ResourceExportReconciler {
 	reconciler := &ResourceExportReconciler{
 		Client:              Client,
 		Scheme:              Scheme,
-		localClusterManager: localClusterManager,
 		installedResExports: cache.NewIndexer(resExportIndexerKeyFunc, cache.Indexers{resExportIndexerByNameKind: resExportIndexerByNameKindFunc}),
 	}
 	return reconciler
@@ -71,7 +67,7 @@ func NewResourceExportReconciler(
 
 func resExportIndexerKeyFunc(obj interface{}) (string, error) {
 	re := obj.(mcsv1alpha1.ResourceExport)
-	return NamespacedName(re.Namespace, re.Name), nil
+	return common.NamespacedName(re.Namespace, re.Name), nil
 }
 
 func resExportIndexerByNameKindFunc(obj interface{}) ([]string, error) {
@@ -90,11 +86,7 @@ func resExportIndexerByNameKindFunc(obj interface{}) ([]string, error) {
 // for all ResourceExports which have the same kind, name and namespace
 // from member clusters.
 func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	klog.V(2).Infof("reconcile for %s", req.NamespacedName)
-	localMgr := *r.localClusterManager
-	if localMgr == nil {
-		return ctrl.Result{}, errors.New("clusterset has not been initialized properly, no local cluster manager")
-	}
+	klog.Infof("ResourceExport reconcile for %s", req.NamespacedName)
 	var resExport mcsv1alpha1.ResourceExport
 	if err := r.Client.Get(ctx, req.NamespacedName, &resExport); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -107,7 +99,7 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		existRe := re.(mcsv1alpha1.ResourceExport)
 		reList := &mcsv1alpha1.ResourceExportList{}
-		err := localMgr.List(ctx, reList, &client.ListOptions{LabelSelector: getLabelSelector(&existRe)})
+		err := r.Client.List(ctx, reList, &client.ListOptions{LabelSelector: getLabelSelector(&existRe)})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -119,7 +111,7 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				Name:      resImportName,
 				Namespace: req.Namespace,
 			}}
-			err := localMgr.Delete(ctx, resImport, &client.DeleteOptions{})
+			err := r.Client.Delete(ctx, resImport, &client.DeleteOptions{})
 			if err != nil {
 				klog.Errorf("fail to delete ResourceImport %s/%s, err: %v", req.Namespace, resImportName, err)
 				if apierrors.IsNotFound(err) {
@@ -132,10 +124,10 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 
 		// should update ResourceImport status when one of ResourceExports is removed?
-		if existRe.Spec.Kind == ServiceKind {
+		if existRe.Spec.Kind == common.ServiceKind {
 			return ctrl.Result{}, nil
 		}
-		uniqueIndex := existRe.Spec.Namespace + existRe.Spec.Name + existRe.Spec.ClusterID + EndpointsKind
+		uniqueIndex := existRe.Spec.Namespace + existRe.Spec.Name + existRe.Spec.ClusterID + common.EndpointsKind
 		epExportCache, err := r.installedResExports.ByIndex(resExportIndexerByNameKind, uniqueIndex)
 		if err != nil {
 			klog.Infof("fail to get cache, err: %v", err)
@@ -147,14 +139,14 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		} else if len(epExportCache) == 1 {
 			epExport := epExportCache[0].(mcsv1alpha1.ResourceExport)
 			resImport := &mcsv1alpha1.ResourceImport{}
-			err := localMgr.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: resImportName}, resImport)
+			err := r.Client.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: resImportName}, resImport)
 			if err != nil {
 				klog.Errorf("fail to get ResourceImport %s/%s, err: %v", req.Namespace, resImportName, err)
 				return ctrl.Result{}, client.IgnoreNotFound(err)
 			}
 			newResImport, changed := r.refreshResourceImport(&epExport, resImport, false)
 			if changed {
-				err = localMgr.Update(ctx, newResImport, &client.UpdateOptions{})
+				err = r.Client.Update(ctx, newResImport, &client.UpdateOptions{})
 				if err != nil {
 					klog.Errorf("fail to update ResourceImport %s/%s", req.Namespace, resImportName)
 					return ctrl.Result{}, err
@@ -175,7 +167,7 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	var createResImport bool
 	existResImport := &mcsv1alpha1.ResourceImport{}
-	err := localMgr.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: resImportName}, existResImport)
+	err := r.Client.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: resImportName}, existResImport)
 	if err != nil {
 		klog.Errorf("fail to get ResourceImport %s/%s, err: %v", req.Namespace, resImportName, err)
 		if !apierrors.IsNotFound(err) {
@@ -198,9 +190,9 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	resImport, changed := r.refreshResourceImport(&resExport, existResImport, createResImport)
 	if changed {
 		if createResImport {
-			err = localMgr.Create(ctx, resImport, &client.CreateOptions{})
+			err = r.Client.Create(ctx, resImport, &client.CreateOptions{})
 		} else {
-			err = localMgr.Update(ctx, resImport, &client.UpdateOptions{})
+			err = r.Client.Update(ctx, resImport, &client.UpdateOptions{})
 		}
 	} else {
 		r.updateCache(resExport, req)
@@ -220,7 +212,7 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	r.updateCache(resExport, req)
 
 	latestResImport := &mcsv1alpha1.ResourceImport{}
-	err = localMgr.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: resImportName}, latestResImport)
+	err = r.Client.Get(ctx, types.NamespacedName{Namespace: req.Namespace, Name: resImportName}, latestResImport)
 	if err != nil {
 		klog.Errorf("fail to get ResourceImport %s/%s,err: %v", req.Namespace, resImportName, err)
 		return ctrl.Result{}, err
@@ -244,7 +236,7 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}},
 	})
 	latestResImport.Status = updatedStatus
-	if err := localMgr.Status().Update(ctx, latestResImport, &client.UpdateOptions{}); err != nil {
+	if err := r.Client.Status().Update(ctx, latestResImport, &client.UpdateOptions{}); err != nil {
 		klog.Errorf("fail to update ResourceImport Status %s/%s, err: %v", req.Namespace, resImportName, err)
 		return ctrl.Result{}, err
 	}
@@ -266,8 +258,8 @@ func (r *ResourceExportReconciler) refreshResourceImport(
 	createResImport bool) (*mcsv1alpha1.ResourceImport, bool) {
 	newResImport := resImport.DeepCopy()
 	switch resExport.Spec.Kind {
-	case ServiceKind:
-		newResImport.Spec.Kind = ServiceImportKind
+	case common.ServiceKind:
+		newResImport.Spec.Kind = common.ServiceImportKind
 		if createResImport {
 			newResImport.Spec.ServiceImport = &mcs.ServiceImport{
 				Spec: mcs.ServiceImportSpec{
@@ -283,8 +275,8 @@ func (r *ResourceExportReconciler) refreshResourceImport(
 			// TODO: update ResourceExport status to reflect port collision?
 		}
 		return newResImport, false
-	case EndpointsKind:
-		newResImport.Spec.Kind = EndpointsKind
+	case common.EndpointsKind:
+		newResImport.Spec.Kind = common.EndpointsKind
 		if createResImport {
 			newResImport.Spec.Endpoints = &mcsv1alpha1.EndpointsImport{
 				Subsets: resExport.Spec.Endpoints.Subsets,
@@ -294,7 +286,7 @@ func (r *ResourceExportReconciler) refreshResourceImport(
 		// check all mateched Endpoints ResourceExport and generate a new EndpointSubset
 		newSubsets := []corev1.EndpointSubset{}
 		reList := &mcsv1alpha1.ResourceExportList{}
-		err := (*r.localClusterManager).List(context.TODO(), reList, &client.ListOptions{
+		err := r.Client.List(context.TODO(), reList, &client.ListOptions{
 			LabelSelector: getLabelSelector(resExport),
 		})
 		if err != nil {

@@ -1,8 +1,10 @@
 package internal
 
 import (
+	multiclustercontrollers "antrea.io/antrea/multicluster/controllers/multicluster"
 	"context"
 	"fmt"
+	"k8s.io/klog/v2"
 	"sync"
 	"time"
 
@@ -38,7 +40,8 @@ type RemoteCluster interface {
 	// tells whether the remote cluster is accessible or not
 	IsConnected() bool
 
-	// TODO: resource monitoring methods needs to be defined.
+	// Start monitoring resources from remote controller and setup reconciler to process resource crud operations
+	StartMonitoring() error
 }
 
 // This implements the commonArea interface and allows local cluster to read/write into
@@ -70,7 +73,9 @@ type remoteCluster struct {
 	// connectivity status, should it be the status?
 	connected bool
 
-	remoteClusterManager RemoteClusterManager
+	localClusterManager *LocalClusterManager
+
+	remoteClusterManager *RemoteClusterManager
 
 	stopFunc context.CancelFunc
 }
@@ -80,8 +85,8 @@ type remoteCluster struct {
  * use the secret and access credentials for the leader to connect to its common area.
  */
 func NewRemoteCluster(clusterID common.ClusterID, clusterSetID common.ClusterSetID, url string, secretName string,
-	scheme *runtime.Scheme, log logr.Logger, remoteClusterManager *RemoteClusterManager, clusterSetNamespace string,
-	configNamespace string) (common.CommonArea, error) {
+	scheme *runtime.Scheme, log logr.Logger, localClusterManager *LocalClusterManager, remoteClusterManager *RemoteClusterManager,
+	clusterSetNamespace string, configNamespace string) (common.CommonArea, error) {
 	log = log.WithName("remote-cluster-" + string(clusterID))
 	log.Info("Create remote cluster for", "cluster", clusterID)
 
@@ -128,7 +133,8 @@ func NewRemoteCluster(clusterID common.ClusterID, clusterSetID common.ClusterSet
 		scheme:               scheme,
 		Namespace:            clusterSetNamespace,
 		connected:            false,
-		remoteClusterManager: *remoteClusterManager,
+		localClusterManager:  localClusterManager,
+		remoteClusterManager: remoteClusterManager,
 	}
 
 	(*remoteClusterManager).AddRemoteCluster(cluster)
@@ -194,7 +200,7 @@ func (r *remoteCluster) SendMemberAnnounce() error {
 	localClusterMemberAnnounceExist := false
 	if len(memberAnnounceList.Items) != 0 {
 		for _, memberAnnounce := range memberAnnounceList.Items {
-			if memberAnnounce.ClusterID == string(r.remoteClusterManager.GetLocalClusterID()) {
+			if memberAnnounce.ClusterID == string((*r.remoteClusterManager).GetLocalClusterID()) {
 				localClusterMemberAnnounceExist = true
 				localClusterMemberAnnounce = memberAnnounce
 				break
@@ -204,8 +210,8 @@ func (r *remoteCluster) SendMemberAnnounce() error {
 	ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelFunc()
 	if localClusterMemberAnnounceExist {
-		if r.remoteClusterManager.GetElectedLeaderClusterID() != common.INVALID_CLUSTER_ID {
-			localClusterMemberAnnounce.LeaderClusterID = string(r.remoteClusterManager.GetElectedLeaderClusterID())
+		if (*r.remoteClusterManager).GetElectedLeaderClusterID() != common.INVALID_CLUSTER_ID {
+			localClusterMemberAnnounce.LeaderClusterID = string((*r.remoteClusterManager).GetElectedLeaderClusterID())
 		}
 
 		if localClusterMemberAnnounce.Annotations == nil {
@@ -221,8 +227,8 @@ func (r *remoteCluster) SendMemberAnnounce() error {
 		// create happens first before a leader can be elected, when the create is successful
 		// it marks the connectivity status to leader election can occur
 		// Therefore the first create will not populate the leader cluster id
-		localClusterMemberAnnounce.ClusterID = string(r.remoteClusterManager.GetLocalClusterID())
-		localClusterMemberAnnounce.Name = "member-announce-from-" + string(r.remoteClusterManager.GetLocalClusterID())
+		localClusterMemberAnnounce.ClusterID = string((*r.remoteClusterManager).GetLocalClusterID())
+		localClusterMemberAnnounce.Name = "member-announce-from-" + string((*r.remoteClusterManager).GetLocalClusterID())
 		localClusterMemberAnnounce.Namespace = r.Namespace
 		localClusterMemberAnnounce.ClusterSetID = string(r.ClusterSetID)
 		if err := r.Create(ctx, &localClusterMemberAnnounce, &client.CreateOptions{}); err != nil {
@@ -314,4 +320,31 @@ func (r *remoteCluster) Stop() error {
 
 func (r *remoteCluster) IsConnected() bool {
 	return r.connected
+}
+
+func (r *remoteCluster) StartMonitoring() error {
+	klog.V(2).Info("Starting monitoring for resourceimports from", "remoteCluster", r.ClusterID)
+
+	resImportReconciler := multiclustercontrollers.NewResourceImportReconciler(
+		r.ClusterManager.GetClient(),
+		r.ClusterManager.GetScheme(),
+		r.localClusterManager,
+		r,
+	)
+	if err := resImportReconciler.SetupWithManager(r.ClusterManager); err != nil {
+		klog.V(2).Error(err, "unable to create controller", "controller", "ResourceImport")
+		return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
+	}
+	if err := (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(r.ClusterManager); err != nil {
+		klog.V(2).Error(err, "unable to create webhook", "webhook", "ResourceImport")
+		return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
+	}
+
+	go func() {
+		r.ClusterManager.Start(context.TODO())
+	}()
+	// TODO: We need to stop it once this remote cluster is no longer the leader.
+	// But for demo, we have only one leader cluster, so come back to this later
+
+	return nil
 }

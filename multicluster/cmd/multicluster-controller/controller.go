@@ -124,12 +124,9 @@ func run(o *Options) error {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterClaim")
 		return fmt.Errorf("unable to create ClusterClaim controller, err: %v", err)
 	}
-	if err = (&multiclustercontrollers.MemberClusterAnnounceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "MemberClusterAnnounce")
-		return fmt.Errorf("unable to create MemberClusterAnnounce controller, err: %v", err)
+	if err = (&multiclusterv1alpha1.ClusterClaim{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "ClusterClaim")
+		return fmt.Errorf("unable to create ClusterClaim webhook, err: %v", err)
 	}
 
 	clusterSetReconciler := &multiclustercontrollers.ClusterSetReconciler{
@@ -143,71 +140,90 @@ func run(o *Options) error {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterSet")
 		return fmt.Errorf("unable to create ClusterSet controller, err: %v", err)
 	}
-
-	remoteMgr := &(clusterSetReconciler.RemoteClusterManager)
-	localMgr := &(clusterSetReconciler.LocalClusterManager)
-	svcExportReconciler := multiclustercontrollers.NewServiceExportReconciler(
-		mgr.GetClient(),
-		mgr.GetScheme(),
-		remoteMgr)
-	if err = svcExportReconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ServiceExport")
-		os.Exit(1)
-	}
-
-	if err = (&multiclustercontrollers.ResourceExportFilterReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ResourceExportFilter")
-		return fmt.Errorf("unable to create ResourceExportFilter controller, err: %v", err)
-	}
-	if err = (&multiclustercontrollers.ResourceImportFilterReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ResourceImportFilter")
-		return fmt.Errorf("unable to create ResourceImportFilter controller, err: %v", err)
-	}
-	if err = (&multiclusterv1alpha1.ClusterClaim{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ClusterClaim")
-		return fmt.Errorf("unable to create ClusterClaim webhook, err: %v", err)
-	}
 	if err = (&multiclusterv1alpha1.ClusterSet{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "ClusterSet")
 		return fmt.Errorf("unable to create ClusterSet webhook, err: %v", err)
+	}
+
+	if err = (&multiclustercontrollers.MemberClusterAnnounceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MemberClusterAnnounce")
+		return fmt.Errorf("unable to create MemberClusterAnnounce controller, err: %v", err)
 	}
 	if err = (&multiclusterv1alpha1.MemberClusterAnnounce{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "MemberClusterAnnounce")
 		return fmt.Errorf("unable to create MemberClusterAnnounce webhook, err: %v", err)
 	}
-	resExportReconciler := multiclustercontrollers.NewResourceExportReconciler(
-		mgr.GetClient(),
-		mgr.GetScheme(),
-		localMgr,
-	)
-	if err = resExportReconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ResourceExport")
-		os.Exit(1)
+
+	remoteMgr := &(clusterSetReconciler.RemoteClusterManager)
+	localMgr := &(clusterSetReconciler.LocalClusterManager)
+
+	if o.leader {
+		// Only leader runs the export resource reconciler
+		resExportReconciler := multiclustercontrollers.NewResourceExportReconciler(
+			mgr.GetClient(),
+			mgr.GetScheme(),
+			localMgr,
+		)
+		if err = resExportReconciler.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ResourceExport")
+			os.Exit(1)
+		}
+		if err = (&multiclusterv1alpha1.ResourceExport{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ResourceExport")
+			return fmt.Errorf("unable to create ResourceExport webhook, err: %v", err)
+		}
+
+		// Only leader runs the export resource filter reconciler
+		if err = (&multiclustercontrollers.ResourceExportFilterReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ResourceExportFilter")
+			return fmt.Errorf("unable to create ResourceExportFilter controller, err: %v", err)
+		}
 	}
-	resImportReconciler := multiclustercontrollers.NewResourceImportReconciler(
-		mgr.GetClient(),
-		mgr.GetScheme(),
-		localMgr,
-		remoteMgr,
-	)
-	if err = resImportReconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ResourceImport")
-		os.Exit(1)
+
+	if o.member {
+		// Only member runs the service export reconciler
+		svcExportReconciler := multiclustercontrollers.NewServiceExportReconciler(
+			mgr.GetClient(),
+			mgr.GetScheme(),
+			remoteMgr)
+		if err = svcExportReconciler.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ServiceExport")
+			os.Exit(1)
+		}
+
+		// Member runs resource import reconciler from common area only
+
+		//resImportReconciler := multiclustercontrollers.NewResourceImportReconciler(
+		//	mgr.GetClient(),
+		//	mgr.GetScheme(),
+		//	localMgr,
+		//	remoteMgr,
+		//)
+		//if err = resImportReconciler.SetupWithManager(mgr); err != nil {
+		//	setupLog.Error(err, "unable to create controller", "controller", "ResourceImport")
+		//	os.Exit(1)
+		//}
+		//if err = (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(mgr); err != nil {
+		//	setupLog.Error(err, "unable to create webhook", "webhook", "ResourceImport")
+		//	return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
+		//}
+
+		// Import resource filter reconciler is only run on the member cluster
+		if err = (&multiclustercontrollers.ResourceImportFilterReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ResourceImportFilter")
+			return fmt.Errorf("unable to create ResourceImportFilter controller, err: %v", err)
+		}
 	}
-	if err = (&multiclusterv1alpha1.ResourceImport{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ResourceImport")
-		return fmt.Errorf("unable to create ResourceImport webhook, err: %v", err)
-	}
-	if err = (&multiclusterv1alpha1.ResourceExport{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "ResourceExport")
-		return fmt.Errorf("unable to create ResourceExport webhook, err: %v", err)
-	}
+
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

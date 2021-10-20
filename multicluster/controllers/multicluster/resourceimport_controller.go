@@ -52,18 +52,18 @@ func resImportIndexerKeyFunc(obj interface{}) (string, error) {
 type ResourceImportReconciler struct {
 	client.Client
 	Scheme               *runtime.Scheme
-	localClusterManager  *internal.LocalClusterManager
-	remoteClusterManager *internal.RemoteClusterManager
+	localClusterManager	 *internal.LocalClusterManager
+	remoteCluster		 internal.RemoteCluster
 	installedSvcs        cache.Indexer
 	installedResImports  cache.Indexer
 }
 
-func NewResourceImportReconciler(client client.Client, scheme *runtime.Scheme, localClusterMgr *internal.LocalClusterManager, remoteClusterMgr *internal.RemoteClusterManager) *ResourceImportReconciler {
+	func NewResourceImportReconciler(client client.Client, scheme *runtime.Scheme, localClusterMgr *internal.LocalClusterManager, remoteCluster internal.RemoteCluster) *ResourceImportReconciler {
 	return &ResourceImportReconciler{
 		Client:               client,
 		Scheme:               scheme,
 		localClusterManager:  localClusterMgr,
-		remoteClusterManager: remoteClusterMgr,
+		remoteCluster:		  remoteCluster,
 		installedSvcs: cache.NewIndexer(svcInfoKeyFunc, cache.Indexers{
 			svcIndexerByType: svcIndexerByTypeFunc,
 		}),
@@ -84,20 +84,16 @@ func NewResourceImportReconciler(client client.Client, scheme *runtime.Scheme, l
 func (r *ResourceImportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	klog.V(2).Infof("Reconciling ResourceImport %s", req.NamespacedName)
 	// TODO: Must check whether this ResourceImport must be reconciled by this member cluster. Check `spec.clusters` field.
-	localMgr := *r.localClusterManager
-	if localMgr == nil {
-		return ctrl.Result{}, errors.New("clusterset has not been initialized properly, no local cluster manager")
+	if r.localClusterManager == nil {
+		return ctrl.Result{}, errors.New("localClusterMgr has not been initialized properly, no remote cluster manager")
 	}
-	remoteClusterMgr := *r.remoteClusterManager
-	if remoteClusterMgr == nil {
-		return ctrl.Result{}, errors.New("clusterset has not been initialized properly, no remote cluster manager")
+
+	if r.remoteCluster == nil {
+		return ctrl.Result{}, errors.New("remoteCluster has not been initialized properly, no remote cluster manager")
 	}
-	remoteCluster, err := r.getRemoteCluster()
-	if err != nil {
-		return ctrl.Result{}, err
-	}
+
 	var resImp multiclusterv1alpha1.ResourceImport
-	err = remoteCluster.Get(ctx, req.NamespacedName, &resImp)
+	err := r.remoteCluster.Get(ctx, req.NamespacedName, &resImp)
 	if err != nil && !apierrors.IsNotFound(err) {
 		klog.Infof("unable to fetch ResourceImport %s/%s, err: %v", req.Namespace, req.Name, err)
 		return ctrl.Result{}, err
@@ -228,19 +224,6 @@ func (r *ResourceImportReconciler) handleResImpDeleteForEndpoints(ctx context.Co
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
-}
-
-// TODO: Demo purpose only. Remove this function.
-func (r *ResourceImportReconciler) getRemoteCluster() (internal.RemoteCluster, error) {
-	var remoteCluster internal.RemoteCluster
-	remoteClusters := (*r.remoteClusterManager).GetRemoteClusters()
-	if len(remoteClusters) <= 0 {
-		return remoteCluster, errors.New("clusterset has not been initialized properly, no remote clusters found")
-	}
-	for _, c := range remoteClusters {
-		return c, nil
-	}
-	return remoteCluster, nil
 }
 
 func getMCSForServiceImport(resImp *multiclusterv1alpha1.ResourceImport) *corev1.Service {

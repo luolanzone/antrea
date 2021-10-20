@@ -266,7 +266,8 @@ func (r *ClusterSetReconciler) updateMultiClusterSetOnMemberCluster(clusterSet *
 			defer wg.Done()
 
 			_, err := internal.NewRemoteCluster(clusterID, r.clusterSetID, url, secretName, r.Scheme,
-				r.Log, &r.RemoteClusterManager, clusterSet.Spec.Namespace, clusterSet.GetNamespace())
+				r.Log, &r.LocalClusterManager, &r.RemoteClusterManager, clusterSet.Spec.Namespace,
+				clusterSet.GetNamespace())
 			if err != nil {
 				r.Log.Error(err, "Unable to create remote cluster", "clusterID", clusterID)
 			} else {

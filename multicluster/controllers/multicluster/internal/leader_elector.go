@@ -93,6 +93,7 @@ func (m *remoteClusterManager) DoLeaderElection() {
 		}
 	}
 	if len(connectedClusterIDs) > 0 {
+		// #nosec G404: random number generator not used for security purposes
 		electedLeaderIndex := rand.Intn(len(connectedClusterIDs))
 		// election complete
 		electedLeaderClusterID := connectedClusterIDs[electedLeaderIndex]

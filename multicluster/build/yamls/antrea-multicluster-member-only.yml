@@ -1339,23 +1339,6 @@ rules:
   - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  labels:
-    app: antrea
-  name: antrea-multicluster-secret-viewer-role
-  namespace: kube-system
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - watch
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   creationTimestamp: null
@@ -1622,26 +1605,16 @@ kind: ClusterRole
 metadata:
   labels:
     app: antrea
-  name: antrea-multicluster-memberclusterannounce-editor-role
+  name: antrea-multicluster-secret-viewer-role
 rules:
 - apiGroups:
-  - multicluster.crd.antrea.io
+  - ""
   resources:
-  - memberclusterannounces
+  - secrets
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
-- apiGroups:
-  - multicluster.crd.antrea.io
-  resources:
-  - memberclusterannounces/status
-  verbs:
-  - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -1654,22 +1627,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: antrea-multicluster-leader-election-role
-subjects:
-- kind: ServiceAccount
-  name: antrea-multicluster-controller
-  namespace: kube-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  labels:
-    app: antrea
-  name: antrea-multicluster-secret-viewer-rolebinding
-  namespace: kube-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: antrea-multicluster-secret-viewer-role
 subjects:
 - kind: ServiceAccount
   name: antrea-multicluster-controller
@@ -1690,9 +1647,24 @@ subjects:
   name: antrea-multicluster-controller
   namespace: kube-system
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: antrea
+  name: antrea-multicluster-secret-viewer-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: antrea-multicluster-secret-viewer-role
+subjects:
+- kind: ServiceAccount
+  name: antrea-multicluster-controller
+  namespace: kube-system
+---
 apiVersion: v1
 data:
-  controller_manager_config.yaml: |
+  controller_manager_config.yaml: |+
     apiVersion: multicluster.crd.antrea.io/v1alpha1
     kind: MultiClusterConfig
     health:
@@ -1704,8 +1676,9 @@ data:
     leaderElection:
       leaderElect: true
       resourceName: 6536456a.crd.antrea.io
-    leader: false
     member: true
+    leader: false
+
 kind: ConfigMap
 metadata:
   annotations: {}

@@ -45,6 +45,7 @@ type ClusterSetReconciler struct {
 	Scheme   *runtime.Scheme
 	Log      logr.Logger
 	IsLeader bool
+	IsMember bool
 
 	clusterSetConfig *multiclusterv1alpha1.ClusterSet
 	clusterSetID     common.ClusterSetID
@@ -98,12 +99,16 @@ func (r *ClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// if update,
 	//    if leader - nothing to do in inbound mode
 	//    if member - if leaders have changed handle accordingly, else nothing to do.
-	if !r.IsLeader {
+
+	// skip creating remote cluster manager in leader only cluster for inbound mode.
+	// otherwise, we need initilize both LocalClusterManager and RemoteClusterManager
+	if r.IsLeader && !r.IsMember {
+		r.createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet)
+	} else {
 		err = r.updateMultiClusterSetOnMemberCluster(clusterSet)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-	} else {
 		r.createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet)
 	}
 
@@ -188,6 +193,7 @@ func (r *ClusterSetReconciler) validateLocalClusterClaim(clusterSet *multicluste
 	return nil
 }
 
+// TODO: need a more proper name since we will initialize LocalClusterManager in member cluster as well.
 func (r *ClusterSetReconciler) createOrUpdateMultiClusterSetOnLeaderCluster(clusterSet *multiclusterv1alpha1.ClusterSet) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -255,7 +261,8 @@ func (r *ClusterSetReconciler) updateMultiClusterSetOnMemberCluster(clusterSet *
 			defer wg.Done()
 
 			_, err := internal.NewRemoteCluster(clusterID, r.clusterSetID, url, secretName, r.Scheme,
-				r.Log, &r.RemoteClusterManager, clusterSet.Spec.Namespace, clusterSet.GetNamespace())
+				r.Log, &r.LocalClusterManager, &r.RemoteClusterManager, clusterSet.Spec.Namespace,
+				clusterSet.GetNamespace())
 			if err != nil {
 				r.Log.Error(err, "Unable to create remote cluster", "clusterID", clusterID)
 			} else {

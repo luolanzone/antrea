@@ -98,6 +98,7 @@ func (m *remoteClusterManager) DoLeaderElection() {
 		electedLeaderClusterID := connectedClusterIDs[electedLeaderIndex]
 		m.electedLeaderCluster = m.remoteClusters[electedLeaderClusterID]
 		m.needElection = false
+		m.electedLeaderCluster.StartMonitoring()
 		log.Info("Election completed", "leader", electedLeaderClusterID)
 		return
 	}

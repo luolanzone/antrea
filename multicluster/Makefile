@@ -54,11 +54,8 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
-ENVTEST_ASSETS_DIR=$(shell pwd)/testbin
-test: manifests generate fmt vet ## Run tests.
-	mkdir -p ${ENVTEST_ASSETS_DIR}
-	test -f ${ENVTEST_ASSETS_DIR}/setup-envtest.sh || curl -sSLo ${ENVTEST_ASSETS_DIR}/setup-envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/v0.8.3/hack/setup-envtest.sh
-	source ${ENVTEST_ASSETS_DIR}/setup-envtest.sh; fetch_envtest_tools $(ENVTEST_ASSETS_DIR); setup_envtest_env $(ENVTEST_ASSETS_DIR); go test ./... -coverprofile cover.out
+.PHONY: test
+test: golangci
 
 ##@ Build
 
@@ -74,6 +71,25 @@ docker-build: build ## Build docker image with the manager.
 
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+.golangci-bin:
+	@echo "===> Installing Golangci-lint <==="
+	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $@ v1.41.1
+
+.PHONY: golangci
+golangci: .golangci-bin
+	@echo "===> Running golangci (linux) <==="
+	@echo $(CURDIR)
+	@GOOS=linux $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/../.golangci.yml
+	@echo "===> Running golangci (windows) <==="
+	@GOOS=windows $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/../.golangci.yml
+
+.PHONY: golangci-fix
+golangci-fix: .golangci-bin
+	@echo "===> Running golangci (linux) <==="
+	@GOOS=linux $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/../.golangci.yml --fix
+	@echo "===> Running golangci (windows) <==="
+	@GOOS=windows $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/../.golangci.yml --fix
 
 ##@ Deployment
 

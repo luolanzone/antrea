@@ -74,11 +74,8 @@ type (
 
 const (
 	// cached indexer
-	svcIndexerByType                     = "service.by.type"
-	epIndexerByLabel                     = "endpoints.by.label"
-	nodeIndexerByServiceName             = "node.by.serviceName"
-	resExportIndexerByKind               = "resourceexport.by.kind"
-	resExportIndexerByNameSpacedNameKind = "resourceexport.by.namespacedNameKind"
+	svcIndexerByType = "service.by.type"
+	epIndexerByLabel = "endpoints.by.label"
 )
 
 var leaderNamespace string

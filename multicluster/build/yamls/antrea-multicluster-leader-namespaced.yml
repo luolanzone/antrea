@@ -6,6 +6,12 @@ metadata:
   name: antrea-multicluster-controller
   namespace: changeme
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: antrea-multicluster-member-access-sa
+  namespace: changeme
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -401,6 +407,20 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: antrea-multicluster-controller
+  namespace: changeme
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: antrea-multicluster-member-cluster-rolebinding
+  namespace: changeme
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: antrea-multicluster-member-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: antrea-multicluster-member-access-sa
   namespace: changeme
 ---
 apiVersion: rbac.authorization.k8s.io/v1

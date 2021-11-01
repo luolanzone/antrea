@@ -1,18 +1,14 @@
 apiVersion: multicluster.crd.antrea.io/v1alpha1
 kind: ClusterSet
 metadata:
-    name: clusterset-sample
-    namespace: kube-system
+    name: test-clusterset
+    namespace: antrea-mcs-ns
 spec:
-    # Sample to be applied on a member cluster
     leaders:
-      - clusterID: test-leader
-        secret: "clusterset-member-1-token-bccfl"
+      - clusterID: test-cluster-leader
+        secret: "leader-access-token"
         server: "https://172.18.0.2:6443"
-        # serviceAccount: "" # This is NA
     members:
-      - clusterID: test-member-1
-        # secret: "" # This is NA
-        # server: "" # This is NA
-        # serviceAccount: "" # This is NA
-    namespace: member-ns-one
+      - clusterID: test-cluster-east
+      - clusterID: test-cluster-west
+    namespace: antrea-mcs-ns

@@ -41,8 +41,8 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=controller-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 #	$(KUSTOMIZE) build config/default > config/multi-cluster.yaml
 	@echo "===> Generating dev manifest for Antrea Multicluster Controller <==="
-	$(CURDIR)/hack/generate-manifest.sh -l -m > build/yamls/antrea-multicluster.yml
-	$(CURDIR)/hack/generate-manifest.sh -l > build/yamls/antrea-multicluster-leader-only.yml
+	$(CURDIR)/hack/generate-manifest.sh -g > build/yamls/antrea-multicluster-leader-global.yml
+	$(CURDIR)/hack/generate-manifest.sh -l changeme > build/yamls/antrea-multicluster-leader-namespaced.yml
 	$(CURDIR)/hack/generate-manifest.sh -m > build/yamls/antrea-multicluster-member-only.yml
 
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.

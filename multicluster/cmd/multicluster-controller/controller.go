@@ -45,9 +45,9 @@ import (
 )
 
 var (
-	setupLog           = ctrl.Log.WithName("setup")
-	validationWebhooks = []string{"antrea-multicluster-validating-webhook-configuration"}
-	mutationWebhooks   = []string{"antrea-multicluster-mutating-webhook-configuration"}
+	setupLog                      = ctrl.Log.WithName("setup")
+	validationWebhooksNamePattern = "%s%santrea-multicluster-validating-webhook-configuration"
+	mutationWebhooksNamePattern   = "%s%santrea-multicluster-mutating-webhook-configuration"
 )
 
 const (
@@ -64,6 +64,20 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 }
 
+func getValidationWebhooks(isLeader bool) []string {
+	if isLeader {
+		return []string{fmt.Sprintf(validationWebhooksNamePattern, env.GetPodNamespace(), "-")}
+	}
+	return []string{fmt.Sprintf(validationWebhooksNamePattern, "", "")}
+}
+
+func getMutationWebhooks(isLeader bool) []string {
+	if isLeader {
+		return []string{fmt.Sprintf(mutationWebhooksNamePattern, env.GetPodNamespace(), "-")}
+	}
+	return []string{fmt.Sprintf(mutationWebhooksNamePattern, "", "")}
+}
+
 func run(o *Options) error {
 	opts := zap.Options{
 		Development: true,
@@ -78,7 +92,7 @@ func run(o *Options) error {
 	}
 
 	secureServing := genericoptions.NewSecureServingOptions().WithLoopback()
-	caCertController, err := certificate.ApplyServerCert(o.SelfSignedCert, client, aggregatorClient, apiExtensionClient, secureServing, getCAConifg())
+	caCertController, err := certificate.ApplyServerCert(o.SelfSignedCert, client, aggregatorClient, apiExtensionClient, secureServing, getCAConfig(o.leader))
 	if err != nil {
 		return fmt.Errorf("error applying server cert: %v", err)
 	}
@@ -246,7 +260,7 @@ func createClients(kubeConfig *rest.Config) (
 	return client, aggregatorClient, apiExtensionClient, nil
 }
 
-func getCAConifg() certificate.CAConfig {
+func getCAConfig(isLeader bool) certificate.CAConfig {
 	return certificate.CAConfig{
 		CAConfigMapName: configMapName,
 		// the key pair name has to be "tls" https://github.com/kubernetes-sigs/controller-runtime/blob/master/pkg/manager/manager.go#L221
@@ -255,8 +269,8 @@ func getCAConifg() certificate.CAConfig {
 		AntreaServiceName:          serviceName,
 		SelfSignedCertDir:          selfSignedCertDir,
 		APIServiceNames:            []string{},
-		MutationWebhooks:           mutationWebhooks,
-		ValidatingWebhooks:         validationWebhooks,
+		MutationWebhooks:           getMutationWebhooks(isLeader),
+		ValidatingWebhooks:         getValidationWebhooks(isLeader),
 		OptionalMutationWebhooks:   []string{},
 		CrdsWithConversionWebhooks: []string{},
 		CertReadyTimeout:           2 * time.Minute,

@@ -20,9 +20,11 @@ function echoerr {
     >&2 echo "$@"
 }
 
-_usage="Usage: $0 [--leader] [--member] [--help|-h]
+_usage="Usage: $0 [--global|-g] [--leader|-l <namespace>] [--member|-m] [--help|-h]
 Generate a YAML manifest for Antrea MultiCluster using Kustomize and print it to stdout.
-        --leader                       Generate a manifest for a Cluster as leader in a ClusterSet
+        --global                       Generate a global manifest for a Cluster as leader in a ClusterSet
+        --leader                       Generate a per-namespace manifest for a Cluster as leader in a ClusterSet.
+                                       All resources will be in the given namespace
         --member                       Generate a manifest for a Cluster as member in a ClusterSet
         --help, -h                     Print this message and exit
 
@@ -37,17 +39,21 @@ function print_help {
     echoerr "Try '$0 --help' for more information."
 }
 
-LEADER=false
-MEMBER=false
+OVERLAY=member
+NAMESPACE=changeme
 
-while getopts lmhu flag
+while getopts gl:mhu flag
 do
     case "${flag}" in
+        g)
+          OVERLAY=leader-global
+          ;;
         l) 
-          LEADER=true
+          OVERLAY=leader-ns
+          NAMESPACE=$OPTARG
           ;;
         m) 
-          MEMBER=true
+          OVERLAY=member
           ;;
         h) 
           print_help
@@ -66,28 +72,27 @@ KUSTOMIZE=$THIS_DIR/../bin/kustomize
 
 KUSTOMIZATION_DIR=$THIS_DIR/../config
 
-TMP_DIR=$(mktemp -d $KUSTOMIZATION_DIR/overlays.XXXXXXXX)
+cd $KUSTOMIZATION_DIR
 
-pushd $TMP_DIR > /dev/null
+if [ "$OVERLAY" == "leader-ns" ] ;
+then
+    TMP_DIR=$(mktemp -d $KUSTOMIZATION_DIR/overlays.XXXXXXXX)
+    pushd $TMP_DIR > /dev/null
+    mkdir config && cd config
+    cp $KUSTOMIZATION_DIR/overlays/leader-ns/prefix_transformer.yaml .
+    sed -ie "s/changeme/$NAMESPACE/g" prefix_transformer.yaml
 
-mkdir config && cd config
+cat << EOF > kustomization.yaml
+namespace: $NAMESPACE
 
-cp $KUSTOMIZATION_DIR/default/configmap/controller_manager_config.yaml controller_manager_config.yaml
+bases:
+  - ../../overlays/leader-ns
 
-if [ "$LEADER" == true ] && [ "$MEMBER" == true ]; then
-    sed -i.bak -E "s/leader: false/leader: true/" controller_manager_config.yaml
-    sed -i.bak -E "s/member: false/member: true/" controller_manager_config.yaml
+transformers:
+  - prefix_transformer.yaml
+EOF
+    $KUSTOMIZE build
+    rm -rf $TMP_DIR
+else
+    $KUSTOMIZE build overlays/$OVERLAY
 fi
-
-if [ "$LEADER" == true ] && [ "$MEMBER" == false ]; then
-    sed -i.bak -E "s/leader: false/leader: true/" controller_manager_config.yaml
-fi
-
-if [ "$LEADER" ==  false ] && [ "$MEMBER" == true ]; then
-    sed -i.bak -E "s/member: false/member: true/" controller_manager_config.yaml
-fi
-
-cp $KUSTOMIZATION_DIR/default/configmap/kustomization.yaml kustomization.yaml
-$KUSTOMIZE build
-
-rm -rf $TMP_DIR

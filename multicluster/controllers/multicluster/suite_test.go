@@ -18,6 +18,7 @@ package multicluster
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -86,7 +87,13 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
-
+	out, _ := exec.Command("which", "kind").Output()
+	if len(string(out)) == 0 {
+		err := exec.Command("sudo", "../../../ci/kind/kind-setup.sh", "kind-install").Run()
+		Expect(err).NotTo(HaveOccurred())
+	}
+	err := exec.Command("sudo", "../../../ci/kind/kind-setup.sh", "create", "kind").Run()
+	Expect(err).NotTo(HaveOccurred())
 	By("bootstrapping test environment")
 	//TODO: KUBECONFIG should be set up by command line.
 	// kubeConfigPath := "/Users/luolan/.kube/local-kind-config"

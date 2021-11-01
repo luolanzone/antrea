@@ -306,6 +306,15 @@ function destroy {
   delete_networks
 }
 
+function kind_install {
+  if [[ $(uname) == 'Darwin' || $(uname) == 'Linux' ]]; then
+    curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.11.1/kind-$(uname)-amd64
+    chmod +x ./kind
+    sudo mv kind /usr/bin
+    exit 0
+  fi
+}
+
 while [[ $# -gt 0 ]]
  do
  key="$1"
@@ -322,6 +331,10 @@ while [[ $# -gt 0 ]]
       ;;
     modify-node)
       modify "$2"
+      exit 0
+      ;;
+    kind-install)
+      kind_install
       exit 0
       ;;
     --pod-cidr)

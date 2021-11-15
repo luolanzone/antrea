@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	antrea.io/libOpenflow v0.5.2
-	antrea.io/ofnet v0.2.3
+	antrea.io/ofnet v0.2.4
 	github.com/Mellanox/sriovnet v1.0.2
 	github.com/Microsoft/go-winio v0.4.16-0.20201130162521-d1ffc52c7331
 	github.com/Microsoft/hcsshim v0.8.9

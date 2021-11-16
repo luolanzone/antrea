@@ -25,14 +25,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"antrea.io/antrea/multicluster/controllers/multicluster/clustermanager"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
-	"antrea.io/antrea/multicluster/controllers/multicluster/internal"
 )
 
 func TestServiceReconciler_Reconcile(t *testing.T) {
 	localClusterID = "cluster-a"
 	localNamespace := "default"
-	remoteMgr := internal.NewRemoteClusterManager("test-clusterset", Log, common.ClusterID(localClusterID))
+	remoteMgr := clustermanager.NewRemoteClusterManager("test-clusterset", Log, common.ClusterID(localClusterID))
 	remoteMgr.Start()
 
 	newSvcNginx := svcNginx.DeepCopy()
@@ -40,7 +40,7 @@ func TestServiceReconciler_Reconcile(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSvcNginx).Build()
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	_ = internal.NewFakeRemoteCluster(scheme, &remoteMgr, fakeRemoteClient, "leader-cluster", "default")
+	_ = clustermanager.NewFakeRemoteCluster(scheme, &remoteMgr, fakeRemoteClient, "leader-cluster", "default")
 	svcNamespaced1 := types.NamespacedName{
 		Namespace: localNamespace,
 		Name:      "nginx-one",

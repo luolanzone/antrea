@@ -32,21 +32,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
+	"antrea.io/antrea/multicluster/controllers/multicluster/clustermanager"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
-	"antrea.io/antrea/multicluster/controllers/multicluster/internal"
 )
 
 // ServiceReconciler reconciles a Service object
 type ServiceReconciler struct {
 	client.Client
 	Scheme               *runtime.Scheme
-	remoteClusterManager *internal.RemoteClusterManager
+	remoteClusterManager *clustermanager.RemoteClusterManager
 }
 
 func NewServiceReconciler(
 	Client client.Client,
 	Scheme *runtime.Scheme,
-	remoteClusterManager *internal.RemoteClusterManager) *ServiceReconciler {
+	remoteClusterManager *clustermanager.RemoteClusterManager) *ServiceReconciler {
 	reconciler := &ServiceReconciler{
 		Client:               Client,
 		Scheme:               Scheme,
@@ -110,8 +110,8 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // we should have only one remote leader cluster at this moment.
 // so check and return the first remote cluster.
-func getRemoteCluster(remoteMgr *internal.RemoteClusterManager) (internal.RemoteCluster, error) {
-	var remoteCluster internal.RemoteCluster
+func getRemoteCluster(remoteMgr *clustermanager.RemoteClusterManager) (clustermanager.RemoteCluster, error) {
+	var remoteCluster clustermanager.RemoteCluster
 	remoteClusters := (*remoteMgr).GetRemoteClusters()
 	if len(remoteClusters) <= 0 {
 		return nil, errors.New("clusterset has not been initialized properly, no remote cluster manager")

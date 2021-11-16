@@ -42,8 +42,8 @@ import (
 	k8smcsv1alpha1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
+	"antrea.io/antrea/multicluster/controllers/multicluster/clustermanager"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
-	"antrea.io/antrea/multicluster/controllers/multicluster/internal"
 )
 
 type (
@@ -67,7 +67,7 @@ type (
 	ServiceExportReconciler struct {
 		Client               client.Client
 		Scheme               *runtime.Scheme
-		remoteClusterManager *internal.RemoteClusterManager
+		remoteClusterManager *clustermanager.RemoteClusterManager
 		installedSvcs        cache.Indexer
 		installedEps         cache.Indexer
 	}
@@ -88,7 +88,7 @@ var (
 func NewServiceExportReconciler(
 	Client client.Client,
 	Scheme *runtime.Scheme,
-	remoteClusterManager *internal.RemoteClusterManager) *ServiceExportReconciler {
+	remoteClusterManager *clustermanager.RemoteClusterManager) *ServiceExportReconciler {
 	reconciler := &ServiceExportReconciler{
 		Client:               Client,
 		Scheme:               Scheme,
@@ -298,7 +298,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{}, nil
 }
 
-func (r *ServiceExportReconciler) handleDeleteEvent(ctx context.Context, req ctrl.Request, remoteCluster internal.RemoteCluster) error {
+func (r *ServiceExportReconciler) handleDeleteEvent(ctx context.Context, req ctrl.Request, remoteCluster clustermanager.RemoteCluster) error {
 	svcResExportName := getResourceExportName(localClusterID, req, "service")
 	epResExportName := getResourceExportName(localClusterID, req, "endpoints")
 	svcResExport := &mcsv1alpha1.ResourceExport{
@@ -419,7 +419,7 @@ func (r *ServiceExportReconciler) serviceHandler(
 	svc *corev1.Service,
 	resName string,
 	re mcsv1alpha1.ResourceExport,
-	rc internal.RemoteCluster) error {
+	rc clustermanager.RemoteCluster) error {
 	kind := common.ServiceKind
 	sinfo := &svcInfo{
 		name:       svc.Name,
@@ -453,7 +453,7 @@ func (r *ServiceExportReconciler) endpointsHandler(
 	ep *corev1.Endpoints,
 	resName string,
 	re mcsv1alpha1.ResourceExport,
-	rc internal.RemoteCluster) error {
+	rc clustermanager.RemoteCluster) error {
 	kind := common.EndpointsKind
 	epInfo := &epInfo{
 		name:       ep.Name,
@@ -513,7 +513,7 @@ func (r *ServiceExportReconciler) updateOrCreateResourceExport(resName string,
 	req ctrl.Request,
 	newResExport *mcsv1alpha1.ResourceExport,
 	existResExport *mcsv1alpha1.ResourceExport,
-	rc internal.RemoteCluster) error {
+	rc clustermanager.RemoteCluster) error {
 	createResExport := reflect.DeepEqual(*existResExport, mcsv1alpha1.ResourceExport{})
 	resNamespaced := types.NamespacedName{Namespace: leaderNamespace, Name: resName}
 	if createResExport {

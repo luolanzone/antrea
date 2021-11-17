@@ -25,6 +25,7 @@ import (
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 )
 
+// fakeRemoteCluster is a fake RemoteCluster for unit test purpose
 type fakeRemoteCluster struct {
 	client.Client
 	ClusterID common.ClusterID
@@ -56,6 +57,7 @@ func (c *fakeRemoteCluster) StartMonitoring() error {
 	return nil
 }
 
+// NewFakeRemoteCluster creates a new fakeRemoteCluster for unit test purpose only
 func NewFakeRemoteCluster(scheme *runtime.Scheme,
 	remoteClusterManager *RemoteClusterManager,
 	fakeClient client.Client, clusterID string, namespace string) RemoteCluster {

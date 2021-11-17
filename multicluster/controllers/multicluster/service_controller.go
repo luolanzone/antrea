@@ -55,6 +55,8 @@ func NewServiceReconciler(
 	return reconciler
 }
 
+//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;delete
+
 // Service Reconcile will clean up MCS Service if no corresponding ResourceImport in leader cluster
 func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	klog.V(2).InfoS("reconciling Service", "service", req.NamespacedName)
@@ -73,7 +75,7 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	leaderNamespace = remoteCluster.GetNamespace()
-	if name, ok := svc.Labels[common.SourceImportLabel]; ok {
+	if name, ok := svc.Annotations[common.SourceImportAnnotation]; ok {
 		resImp := &mcsv1alpha1.ResourceImport{}
 		resImpNamespaced := types.NamespacedName{Namespace: leaderNamespace, Name: name}
 		if err := remoteCluster.Get(ctx, resImpNamespaced, resImp); err != nil {
@@ -95,7 +97,7 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	instance, _ := predicate.LabelSelectorPredicate(metav1.LabelSelector{
 		MatchLabels: map[string]string{
-			common.AntreaMcsAutoGenLabel: "true",
+			common.AntreaMCSAutoGenAnnotation: "true",
 		},
 	})
 	return ctrl.NewControllerManagedBy(mgr).
@@ -104,4 +106,20 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			MaxConcurrentReconciles: common.DefaultWorkerCount,
 		}).
 		Complete(r)
+}
+
+// we should have only one remote leader cluster at this moment.
+// so check and return the first remote cluster.
+func getRemoteCluster(remoteMgr *internal.RemoteClusterManager) (internal.RemoteCluster, error) {
+	var remoteCluster internal.RemoteCluster
+	remoteClusters := (*remoteMgr).GetRemoteClusters()
+	if len(remoteClusters) <= 0 {
+		return nil, errors.New("clusterset has not been initialized properly, no remote cluster manager")
+	}
+
+	for _, c := range remoteClusters {
+		remoteCluster = c
+		break
+	}
+	return remoteCluster, nil
 }

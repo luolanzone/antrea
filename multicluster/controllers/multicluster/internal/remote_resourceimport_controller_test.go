@@ -246,7 +246,7 @@ func TestResourceImportReconciler_handleUpdateEvent(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      "nginx",
-			Labels:    map[string]string{common.AntreaMcsAutoGenLabel: "true"},
+			Labels:    map[string]string{common.AntreaMCSAutoGenAnnotation: "true"},
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: nginxPorts,
@@ -256,7 +256,7 @@ func TestResourceImportReconciler_handleUpdateEvent(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      "nginx",
-			Labels:    map[string]string{common.AntreaMcsAutoGenLabel: "true"},
+			Labels:    map[string]string{common.AntreaMCSAutoGenAnnotation: "true"},
 		},
 		Subsets: epSubset,
 	}

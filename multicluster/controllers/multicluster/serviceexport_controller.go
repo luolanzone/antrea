@@ -177,8 +177,6 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
-		// cleanup multi-cluster labels for the Service so we don't watch it anymore
-		r.cleanUpLabels(ctx, svc, req)
 		err = r.handleDeleteEvent(ctx, req, remoteCluster)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -210,7 +208,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// skip if ServiceExport is trying to export MCS Service/Endpoints
 	if !svcInstalled || !epInstalled {
-		if _, ok := svc.Labels[common.AntreaMcsAutoGenLabel]; ok {
+		if _, ok := svc.Labels[common.AntreaMCSAutoGenAnnotation]; ok {
 			klog.InfoS("it's not allowed to export the multi-cluster controller auto-generated Service", "service", req.String())
 			err = r.updateSvcExportStatus(ctx, req, "imported-service")
 			if err != nil {
@@ -300,20 +298,6 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{}, nil
 }
 
-func (r *ServiceExportReconciler) cleanUpLabels(ctx context.Context, svc *corev1.Service, req ctrl.Request) {
-	err := r.Client.Get(ctx, req.NamespacedName, svc)
-	if err == nil {
-		delete(svc.Labels, common.AntreaMcsLabel)
-		// ignore error since the service event will be triggered again
-		// then here we can delete in another time.
-		_ = r.Client.Update(ctx, svc)
-	} else if apierrors.IsNotFound(err) {
-		klog.V(2).InfoS("Service not found, no need to clean up multi-cluster labels", "service", req.String())
-	} else {
-		klog.V(2).ErrorS(err, "fail to get Service, unable to clean up multi-cluster labels", "service", req.String())
-	}
-}
-
 func (r *ServiceExportReconciler) handleDeleteEvent(ctx context.Context, req ctrl.Request, remoteCluster internal.RemoteCluster) error {
 	svcResExportName := getResourceExportName(localClusterID, req, "service")
 	epResExportName := getResourceExportName(localClusterID, req, "endpoints")
@@ -361,14 +345,14 @@ func (r *ServiceExportReconciler) updateSvcExportStatus(ctx context.Context, req
 	var reason, message *string
 	switch cause {
 	case "not-found":
-		reason = common.GetPointer("not_found_service")
-		message = common.GetPointer("corresponding Service does not exist")
+		reason = getPointer("not_found_service")
+		message = getPointer("corresponding Service does not exist")
 	case "imported-service":
-		reason = common.GetPointer("imported_service")
-		message = common.GetPointer("corresponding Service is imported service, it's not allowed to export")
+		reason = getPointer("imported_service")
+		message = getPointer("corresponding Service is imported service, it's not allowed to export")
 	default:
-		reason = common.GetPointer("invalid_service")
-		message = common.GetPointer("it's not allowed to export")
+		reason = getPointer("invalid_service")
+		message = getPointer("it's not allowed to export")
 	}
 
 	svcExportConditions := svcExport.Status.DeepCopy().Conditions
@@ -407,31 +391,16 @@ func (r *ServiceExportReconciler) updateSvcExportStatus(ctx context.Context, req
 func (r *ServiceExportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&k8smcsv1alpha1.ServiceExport{}).
-		Watches(&source.Kind{Type: &corev1.Service{}}, handler.EnqueueRequestsFromMapFunc(serviceMapFunc)).
-		Watches(&source.Kind{Type: &corev1.Endpoints{}}, handler.EnqueueRequestsFromMapFunc(endpointsMapFunc)).
+		Watches(&source.Kind{Type: &corev1.Service{}}, handler.EnqueueRequestsFromMapFunc(objMapFunc)).
+		Watches(&source.Kind{Type: &corev1.Endpoints{}}, handler.EnqueueRequestsFromMapFunc(objMapFunc)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: common.DefaultWorkerCount,
 		}).
 		Complete(r)
 }
 
-func serviceMapFunc(a client.Object) []reconcile.Request {
-	if _, ok := a.(*corev1.Service).Labels[common.AntreaMcsLabel]; ok {
-		// events mapping from Service to ServiceExport
-		return objToRequest(a)
-	}
-	return nil
-}
-
-func endpointsMapFunc(a client.Object) []reconcile.Request {
-	if _, ok := a.(*corev1.Endpoints).Labels[common.AntreaMcsLabel]; ok {
-		// events mapping from Endpoints to ServiceExport
-		return objToRequest(a)
-	}
-	return nil
-}
-
-func objToRequest(a client.Object) []reconcile.Request {
+// objMapFunc simply maps all object events to ServiceExport
+func objMapFunc(a client.Object) []reconcile.Request {
 	return []reconcile.Request{
 		{
 			NamespacedName: types.NamespacedName{
@@ -470,16 +439,6 @@ func (r *ServiceExportReconciler) serviceHandler(
 		}
 	}
 	if err = r.updateOrCreateResourceExport(resName, ctx, req, &re, existResExport, rc); err != nil {
-		return err
-	}
-	if svc.Labels != nil {
-		svc.Labels[common.AntreaMcsLabel] = "true"
-	} else {
-		svc.Labels = map[string]string{common.AntreaMcsLabel: "true"}
-	}
-	// update Service's label with `antrea.io/multi-cluster` so we can watch Service's events via event mapping function.
-	if err := r.Client.Update(ctx, svc); err != nil {
-		klog.ErrorS(err, "fail to update Service labels", "service", req.String())
 		return err
 	}
 	r.installedSvcs.Add(sinfo)
@@ -622,4 +581,9 @@ func getEndPointsPorts(ep *corev1.Endpoints) []corev1.EndpointPort {
 
 func getResourceExportName(clusterID string, req ctrl.Request, kind string) string {
 	return clusterID + "-" + req.Namespace + "-" + req.Name + "-" + kind
+}
+
+func getPointer(str string) *string {
+	t := str
+	return &t
 }

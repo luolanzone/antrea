@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -52,7 +53,6 @@ func TestServiceExportReconciler_handleDeleteEvent(t *testing.T) {
 		},
 	}
 	exportedSvcNginx := svcNginx.DeepCopy()
-	exportedSvcNginx.Labels = map[string]string{common.AntreaMcsLabel: "true", "app": "nginx"}
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(exportedSvcNginx).Build()
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existSvcResExport, existEpResExport).Build()
@@ -62,13 +62,21 @@ func TestServiceExportReconciler_handleDeleteEvent(t *testing.T) {
 	if _, err := r.Reconcile(ctx, req); err != nil {
 		t.Errorf("ServiceExport Reconciler should handle delete event successfully but got error = %v", err)
 	} else {
-		expectedLabel := map[string]string{"app": "nginx"}
-		newSvc := &corev1.Service{}
-		err := fakeClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "nginx"}, newSvc)
-		if err != nil {
-			t.Errorf("ServiceExport Reconciler should get new Service successfully but got error = %v", err)
-		} else if !reflect.DeepEqual(newSvc.Labels, expectedLabel) {
-			t.Errorf("new Service label %v is not the same as expected %v", newSvc.Labels, expectedLabel)
+		epResource := &mcsv1alpha1.ResourceExport{}
+		err := fakeRemoteClient.Get(ctx, types.NamespacedName{
+			Namespace: "default",
+			Name:      "cluster-a-default-nginx-endpoints",
+		}, epResource)
+		if !apierrors.IsNotFound(err) {
+			t.Errorf("expect not found error but got error = %v", err)
+		}
+		svcResource := &mcsv1alpha1.ResourceExport{}
+		err = fakeRemoteClient.Get(ctx, types.NamespacedName{
+			Namespace: "default",
+			Name:      "cluster-a-default-nginx-service",
+		}, svcResource)
+		if !apierrors.IsNotFound(err) {
+			t.Errorf("expect not found error but got error = %v", err)
 		}
 	}
 }
@@ -114,7 +122,7 @@ func TestServiceExportReconciler_ExportMCSService(t *testing.T) {
 	remoteMgr.Start()
 
 	mcsSvc := svcNginx.DeepCopy()
-	mcsSvc.Labels = map[string]string{common.AntreaMcsAutoGenLabel: "true"}
+	mcsSvc.Labels = map[string]string{common.AntreaMCSAutoGenAnnotation: "true"}
 	existSvcExport := &k8smcsv1alpha1.ServiceExport{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
@@ -282,21 +290,18 @@ func TestServiceExportReconciler_handleServiceUpdateEvent(t *testing.T) {
 	}
 }
 
-func Test_serviceMapFunc(t *testing.T) {
+func Test_objMapFunc(t *testing.T) {
 	tests := []struct {
 		name string
 		obj  client.Object
 		want []reconcile.Request
 	}{
 		{
-			name: "Service Object has MCS label",
+			name: "map Service Object event",
 			obj: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "nginx",
 					Namespace: "default",
-					Labels: map[string]string{
-						common.AntreaMcsLabel: "true",
-					},
 				},
 			},
 			want: []reconcile.Request{
@@ -309,43 +314,11 @@ func Test_serviceMapFunc(t *testing.T) {
 			},
 		},
 		{
-			name: "Service Object doesn't have MCS label",
-			obj: &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "nginx",
-					Namespace: "default",
-					Labels: map[string]string{
-						"fakelabel": "true",
-					},
-				},
-			},
-			want: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := serviceMapFunc(tt.obj); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("serviceMapFunc() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_endpointsMapFunc(t *testing.T) {
-	tests := []struct {
-		name string
-		obj  client.Object
-		want []reconcile.Request
-	}{
-		{
-			name: "Endpoints Object has MCS label",
+			name: "map Endpoints Object event",
 			obj: &corev1.Endpoints{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "nginx",
 					Namespace: "default",
-					Labels: map[string]string{
-						common.AntreaMcsLabel: "true",
-					},
 				},
 			},
 			want: []reconcile.Request{
@@ -357,24 +330,11 @@ func Test_endpointsMapFunc(t *testing.T) {
 				},
 			},
 		},
-		{
-			name: "Endpoints Object doesn't have MCS label",
-			obj: &corev1.Endpoints{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "nginx",
-					Namespace: "default",
-					Labels: map[string]string{
-						"fakelabel": "true",
-					},
-				},
-			},
-			want: nil,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := endpointsMapFunc(tt.obj); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("endpointsMapFunc() = %v, want %v", got, tt.want)
+			if got := objMapFunc(tt.obj); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Test_objMapFunc() = %v, want %v", got, tt.want)
 			}
 		})
 	}

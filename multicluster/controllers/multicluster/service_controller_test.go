@@ -36,7 +36,7 @@ func TestServiceReconciler_Reconcile(t *testing.T) {
 	remoteMgr.Start()
 
 	newSvcNginx := svcNginx.DeepCopy()
-	newSvcNginx.Labels = map[string]string{common.SourceImportLabel: "default-nginx-service"}
+	newSvcNginx.Annotations = map[string]string{common.SourceImportAnnotation: "default-nginx-service"}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSvcNginx).Build()
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 

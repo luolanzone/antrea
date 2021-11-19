@@ -50,6 +50,12 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: test
+test:  
+	$(CURDIR)/hack/verify_kind.sh 
+	$(CURDIR)/ci/test_integration.sh
+	go test -timeout 100s -run ^TestAPIs$$ antrea.io/antrea/multicluster/test/integration -v
+
 .PHONY: .coverage
 .coverage:
 	mkdir -p $(CURDIR)/.coverage

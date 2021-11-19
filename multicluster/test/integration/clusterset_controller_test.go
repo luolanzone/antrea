@@ -17,6 +17,7 @@ package integration
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -72,6 +73,7 @@ var _ = Describe("ClusterSet controller", func() {
 		Expect(err == nil).Should(BeTrue())
 		_, err = antreaMcsCrdClient.MulticlusterV1alpha1().ClusterSets(LeaderNamespace).Create(ctx, clusterSet, metav1.CreateOptions{})
 		Expect(err == nil).Should(BeTrue())
+		time.Sleep(20 * time.Second)
 		Eventually(func() bool {
 			_, err = antreaMcsCrdClient.MulticlusterV1alpha1().MemberClusterAnnounces(LeaderNamespace).Get(ctx, "member-announce-from-cluster-a", metav1.GetOptions{})
 			return err == nil

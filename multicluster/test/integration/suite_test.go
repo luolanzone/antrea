@@ -18,13 +18,17 @@ package integration
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -87,11 +91,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
-
+	os.Setenv("KUBECONFIG", "/tmp/kube/config")
 	By("bootstrapping test environment")
-	//TODO: KUBECONFIG should be set up by command line.
-	// kubeConfigPath := "/Users/luolan/.kube/local-kind-config"
-	// os.Setenv("KUBECONFIG", kubeConfigPath)
 	useExistingCluster := true
 	// binPath, err := os.Getwd()
 	// os.Setenv("KUBEBUILDER_ASSETS", binPath+"/../../bin")
@@ -101,7 +102,8 @@ var _ = BeforeSuite(func() {
 		UseExistingCluster:    &useExistingCluster,
 	}
 
-	cfg, err := testEnv.Start()
+	var err error
+	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
@@ -129,23 +131,24 @@ var _ = BeforeSuite(func() {
 	k8sClient.Create(ctx, leaderNs)
 	k8sClient.Create(ctx, testNs)
 
-	// TODO: accessToken should be created before testing.
-	// accessToken := &corev1.Secret{
-	// 	ObjectMeta: metav1.ObjectMeta{
-	// 		Name:      "access-token",
-	// 		Namespace: LeaderNamespace,
-	// 	},
-	// 	Data: map[string][]byte{
-	// 		"ca.crt": testEnv.Config.CAData,
-	// 		"token":  []byte(token),
-	// 	},
-	// }
+	out, err := exec.Command("sudo", "../../ci/./export_token.sh").Output()
+	token := strings.TrimRight(string(out), "\n")
+	accessToken := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "access-token",
+			Namespace: LeaderNamespace,
+		},
+		Data: map[string][]byte{
+			"ca.crt": testEnv.Config.CAData,
+			"token":  []byte(token),
+		},
+	}
 
-	// err = k8sClient.Create(ctx, accessToken, &client.CreateOptions{})
-	// if err != nil {
-	// 	Expect(err != nil && apierrors.IsAlreadyExists(err)).To(Equal(true))
-	// }
-	// time.Sleep(2 * time.Second)
+	err = k8sClient.Create(ctx, accessToken, &client.CreateOptions{})
+	if err != nil {
+		Expect(err != nil && apierrors.IsAlreadyExists(err)).To(Equal(true))
+	}
+	time.Sleep(2 * time.Second)
 
 	clustermanager.SetSecretClient(k8sClient)
 	clusterSetReconciler := &multiclustercontrollers.ClusterSetReconciler{

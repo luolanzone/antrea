@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	k8smcsv1alpha1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 )
 
@@ -215,9 +216,10 @@ var _ = Describe("ServiceExport controller", func() {
 		err := k8sClient.Delete(ctx, svcExport)
 		Expect(err).ToNot(HaveOccurred())
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(10 * time.Second)
 		Eventually(func() bool {
-			_, err = antreaMcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNamespace).Get(ctx, svcResExportName, metav1.GetOptions{})
+			res, err := antreaMcsCrdClient.MulticlusterV1alpha1().ResourceExports(LeaderNamespace).Get(ctx, svcResExportName, metav1.GetOptions{})
+			klog.Infof("res and serviceexporterror: %v %v", res, err)
 			return apierrors.IsNotFound(err)
 		}, timeout, interval).Should(BeTrue())
 		Eventually(func() bool {

@@ -175,6 +175,13 @@ var _ = BeforeSuite(func() {
 	err = svcExportReconciler.SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
+	svcReconciler := multiclustercontrollers.NewServiceReconciler(
+		k8sManager.GetClient(),
+		k8sManager.GetScheme(),
+		&remoteMgr)
+	err = svcReconciler.SetupWithManager(k8sManager)
+	Expect(err).ToNot(HaveOccurred())
+
 	// localMgr := clustermanager.NewLocalClusterManager(k8sClient, "leader-cluster", "leaderns-one", Log)
 	// resExportReconciler := NewResourceExportReconciler(
 	// 	k8sManager.GetClient(),

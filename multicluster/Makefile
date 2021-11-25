@@ -50,10 +50,13 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
-.PHONY: test
-test:  
+.PHONY: test-integration 
+test-integration:  
+	@echo
+	@echo "==> Running integration tests <=="
+	@echo "SOME TESTS WILL FAIL IF NOT RUN AS ROOT!"
 	$(CURDIR)/hack/verify_kind.sh 
-	$(CURDIR)/ci/test_integration.sh
+	$(CURDIR)/test/integration/test_integration.sh
 	go test -timeout 120s -run ^TestAPIs$$ antrea.io/antrea/multicluster/test/integration -v
 
 .PHONY: .coverage

@@ -14,9 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The script creates and deletes kind testbeds. Kind testbeds may be created with
-# docker images preloaded, antrea-cni preloaded, antrea-cni's encapsulation mode,
-# and docker bridge network connecting to worker Node.
-
 TOKEN=$(sudo kubectl get secret leader-access-token -n leader-ns -o jsonpath='{.data.token}' --kubeconfig=/tmp/kube/config | base64 --decode)
 echo $TOKEN

@@ -14,19 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The script creates and deletes kind testbeds. Kind testbeds may be created with
-# docker images preloaded, antrea-cni preloaded, antrea-cni's encapsulation mode,
-# and docker bridge network connecting to worker Node.
-
 mkdir -p /tmp/kube
 chmod -R 777 /tmp/kube
 cat /dev/null > /tmp/kube/config
 chmod 777 /tmp/kube
 export kubeconfig=/tmp/kube/config
 kind create cluster --name=antrea-leader --kubeconfig=/tmp/kube/config
+time sleep 5
 
 kubectl create namespace leader-ns --kubeconfig=/tmp/kube/config
-time sleep 10
 kubectl create -f config/integration/antrea-mc-member-access-sa.yml --kubeconfig=/tmp/kube/config
-time sleep 10
 kubectl apply -f config/integration/token-secret.yml --kubeconfig=/tmp/kube/config

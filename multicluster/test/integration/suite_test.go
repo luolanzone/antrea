@@ -131,7 +131,7 @@ var _ = BeforeSuite(func() {
 	k8sClient.Create(ctx, leaderNs)
 	k8sClient.Create(ctx, testNs)
 
-	out, err := exec.Command("sudo", "../../ci/./export_token.sh").Output()
+	out, err := exec.Command("sudo", "./export_token.sh").Output()
 	token := strings.TrimRight(string(out), "\n")
 	accessToken := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

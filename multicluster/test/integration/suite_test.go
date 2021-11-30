@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -162,6 +163,7 @@ var _ = BeforeSuite(func() {
 
 	remoteMgr := clustermanager.NewRemoteClusterManager("test-clusterset", Log, common.ClusterID(LocalClusterID))
 	go remoteMgr.Start()
+	localMgr := clustermanager.NewLocalClusterManager(k8sClient, common.ClusterID(LocalClusterID), LeaderNamespace, Log)
 	_, err = clustermanager.NewRemoteCluster(common.ClusterID(LocalClusterID),
 		"test-clusterset", k8sServerURL, "access-token",
 		k8sManager.GetScheme(), Log, nil, &remoteMgr,
@@ -182,6 +184,18 @@ var _ = BeforeSuite(func() {
 	err = svcReconciler.SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
+	currentLeaders := remoteMgr.GetRemoteClusters()
+	klog.Infof("currentLeaders: %v", currentLeaders)
+	remotecluster := currentLeaders[common.ClusterID(LocalClusterID)]
+	resImportReconciler := clustermanager.NewResourceImportReconciler(
+		k8sManager.GetClient(),
+		k8sManager.GetScheme(),
+		&localMgr,
+		remotecluster)
+
+	err = resImportReconciler.SetupWithManager(k8sManager)
+	Expect(err).ToNot(HaveOccurred())
+
 	// localMgr := clustermanager.NewLocalClusterManager(k8sClient, "leader-cluster", "leaderns-one", Log)
 	// resExportReconciler := NewResourceExportReconciler(
 	// 	k8sManager.GetClient(),
@@ -196,6 +210,7 @@ var _ = BeforeSuite(func() {
 	}()
 }, 60)
 
+/*
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	k8sClient.Delete(context.TODO(), testNs)
@@ -203,3 +218,4 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+*/

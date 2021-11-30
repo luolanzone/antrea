@@ -40,7 +40,7 @@ var _ = Describe("Service controller", func() {
 				Name:        "nginx",
 				Namespace:   testNamespace,
 				Labels:      map[string]string{common.AntreaMCSAutoGenAnnotation: "true"},
-				Annotations: map[string]string{common.SourceImportAnnotation: "doesnotexit"},
+				Annotations: map[string]string{common.SourceImportAnnotation: "doesnotexist"},
 			},
 			Spec: svcSpec,
 		}
@@ -62,7 +62,7 @@ var _ = Describe("Service controller", func() {
 		By("By claim a service and a corresponding ResourceImport in leader cluster")
 		resImport := &v1alpha1.ResourceImport{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "resourceimportexit",
+				Name:      "resourceimportexist",
 				Namespace: LeaderNamespace,
 			},
 		}
@@ -75,7 +75,7 @@ var _ = Describe("Service controller", func() {
 				Name:        "nginxtodelete",
 				Namespace:   testNamespace,
 				Labels:      map[string]string{common.AntreaMCSAutoGenAnnotation: "true"},
-				Annotations: map[string]string{common.SourceImportAnnotation: "resourceimportexit"},
+				Annotations: map[string]string{common.SourceImportAnnotation: "resourceimportexist"},
 			},
 			Spec: svcSpec,
 		}

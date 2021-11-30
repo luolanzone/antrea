@@ -319,12 +319,13 @@ func (r *ServiceExportReconciler) handleDeleteEvent(ctx context.Context, req ctr
 	epResExportNamespaced := common.NamespacedName(leaderNamespace, epResExportName)
 	resExp := &mcsv1alpha1.ResourceExport{}                                                      // For remoteCluster.Get, To delete
 	resExpNamespaced := types.NamespacedName{Namespace: leaderNamespace, Name: svcResExportName} // For remoteCluster.Get, To delete
-	err := remoteCluster.Get(ctx, resExpNamespaced, resExp)                                      // For testing remoteCluster.Delete, To delete
-	klog.Infof("svc get err: %v", err)                                                           // For logging result of remoteCluster.Get, To delete
-	err = remoteCluster.Delete(ctx, svcResExport, &client.DeleteOptions{})
-	klog.Infof("svc err: %v", err)                         // For logging result of remoteCluster.delete, To delete
-	err = remoteCluster.Get(ctx, resExpNamespaced, resExp) // For testing remoteCluster.Delete, To delete
-	klog.Infof("svc get err: %v", err)                     // For logging result of remoteCluster.Get, To delete
+
+	err_first_get := remoteCluster.Get(ctx, resExpNamespaced, resExp) // For testing remoteCluster.Delete, To delete
+	klog.Infof("svc err_first_get: %v", err_first_get)                // For logging result of remoteCluster.Get, To delete
+	err := remoteCluster.Delete(ctx, svcResExport, &client.DeleteOptions{})
+	klog.Infof("svc err: %v", err)                                     // For logging result of remoteCluster.delete, To delete
+	err_second_get := remoteCluster.Get(ctx, resExpNamespaced, resExp) // For testing remoteCluster.Delete, To delete
+	klog.Infof("svc err_second_get: %v", err_second_get)               // For logging result of remoteCluster.Get, To delete
 	if err != nil && !apierrors.IsNotFound(err) {
 		klog.InfoS("fail to delete ResourceExport in remote cluster", "resourceexport",
 			svcResExportNamespaced, "clusterID", leaderClusterID, "err", err)

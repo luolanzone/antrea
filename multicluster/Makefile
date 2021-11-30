@@ -55,9 +55,8 @@ test-integration:
 	@echo
 	@echo "==> Running integration tests <=="
 	@echo "SOME TESTS WILL FAIL IF NOT RUN AS ROOT!"
-	$(CURDIR)/hack/verify_kind.sh 
 	$(CURDIR)/test/integration/test_integration.sh
-	go test -timeout 120s -run ^TestAPIs$$ antrea.io/antrea/multicluster/test/integration -v
+	go test -timeout 150s -run ^TestAPIs$$ antrea.io/antrea/multicluster/test/integration -v
 
 .PHONY: .coverage
 .coverage:

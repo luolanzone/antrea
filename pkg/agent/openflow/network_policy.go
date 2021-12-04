@@ -19,10 +19,14 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"antrea.io/antrea/pkg/agent/config"
+	"antrea.io/antrea/pkg/agent/openflow/cookie"
 	"antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/apis/controlplane/v1beta2"
 	crdv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
@@ -1699,4 +1703,85 @@ func (c *client) NetworkPolicyMetrics() map[uint32]*types.RuleMetric {
 	collectMetricsFromFlows(egressFlows)
 	collectMetricsFromFlows(ingressFlows)
 	return result
+}
+
+type featureNetworkPolicy struct {
+	cookieAllocator cookie.Allocator
+	ipProtocols     []binding.Protocol
+	bridge          binding.Bridge
+
+	// globalConjMatchFlowCache is a global map for conjMatchFlowContext. The key is a string generated from the
+	// conjMatchFlowContext.
+	globalConjMatchFlowCache map[string]*conjMatchFlowContext
+	conjMatchFlowLock        sync.Mutex // Lock for access globalConjMatchFlowCache
+	// policyCache is a storage that supports listing policyRuleConjunction with different indexers.
+	// It's guaranteed that one policyRuleConjunction is processed by at most one goroutine at any given time.
+	policyCache       cache.Indexer
+	flowCategoryCache *flowCategoryCache
+	packetInHandlers  map[uint8]map[string]PacketInHandler
+
+	gatewayIPs map[binding.Protocol]net.IP
+
+	proxyAll              bool
+	ovsMetersAreSupported bool
+	enableDenyTracking    bool
+	enableAntreaPolicy    bool
+	// deterministic represents whether to generate flows deterministically.
+	// For example, if a flow has multiple actions, setting it to true can get consistent flow.
+	// Enabling it may carry a performance impact. It's disabled by default and should only be used in testing.
+	deterministic bool
+}
+
+func (c *featureNetworkPolicy) getFeatureID() featureID {
+	return NetworkPolicy
+}
+
+func newFeatureNetworkPolicy(
+	cookieAllocator cookie.Allocator,
+	ipProtocols []binding.Protocol,
+	bridge binding.Bridge,
+	nodeConfig *config.NodeConfig,
+	proxyAll,
+	ovsMetersAreSupported,
+	enableDenyTracking,
+	enableAntreaPolicy bool) *featureNetworkPolicy {
+	gatewayIPs := make(map[binding.Protocol]net.IP)
+	for _, ipProtocol := range ipProtocols {
+		if ipProtocol == binding.ProtocolIP {
+			gatewayIPs[ipProtocol] = nodeConfig.GatewayConfig.IPv4
+		} else if ipProtocol == binding.ProtocolIPv6 {
+			gatewayIPs[ipProtocol] = nodeConfig.GatewayConfig.IPv6
+		}
+	}
+	return &featureNetworkPolicy{
+		cookieAllocator:          cookieAllocator,
+		ipProtocols:              ipProtocols,
+		bridge:                   bridge,
+		flowCategoryCache:        newFlowCategoryCache(),
+		globalConjMatchFlowCache: make(map[string]*conjMatchFlowContext),
+		packetInHandlers:         map[uint8]map[string]PacketInHandler{},
+		policyCache:              cache.NewIndexer(policyConjKeyFunc, cache.Indexers{priorityIndex: priorityIndexFunc}),
+		gatewayIPs:               gatewayIPs,
+		proxyAll:                 proxyAll,
+		ovsMetersAreSupported:    ovsMetersAreSupported,
+		enableDenyTracking:       enableDenyTracking,
+		enableAntreaPolicy:       enableAntreaPolicy,
+	}
+}
+
+func (c *featureNetworkPolicy) initialize(category cookie.Category) []binding.Flow {
+	egressTables = map[uint8]struct{}{
+		EgressRuleTable.GetID():    {},
+		EgressDefaultTable.GetID(): {},
+	}
+	if c.enableAntreaPolicy {
+		egressTables[AntreaPolicyEgressRuleTable.GetID()] = struct{}{}
+	}
+
+	var flows []binding.Flow
+	flows = append(flows, c.establishedConnectionFlows(category)...)
+	flows = append(flows, c.relatedConnectionFlows(category)...)
+	flows = append(flows, c.rejectBypassNetworkpolicyFlows(category)...)
+	flows = append(flows, c.ingressClassifierFlows(category)...)
+	return flows
 }

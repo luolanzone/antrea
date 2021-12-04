@@ -41,39 +41,74 @@ import (
 )
 
 var (
-	ClassifierTable              = binding.NewOFTable(0, "Classification")
-	UplinkTable                  = binding.NewOFTable(5, "Uplink")
-	SpoofGuardTable              = binding.NewOFTable(10, "SpoofGuard")
-	arpResponderTable            = binding.NewOFTable(20, "ARPResponder")
-	IPv6Table                    = binding.NewOFTable(21, "IPv6")
-	MulticastTable               = binding.NewOFTable(22, "Multicast")
-	ServiceHairpinTable          = binding.NewOFTable(23, "ServiceHairpin")
-	ServiceConntrackTable        = binding.NewOFTable(24, "ServiceConntrack") // serviceConntrackTable use a new ct_zone to transform SNAT'd connections.
-	ConntrackTable               = binding.NewOFTable(30, "ConntrackZone")
-	ConntrackStateTable          = binding.NewOFTable(31, "ConntrackState")
-	ServiceClassifierTable       = binding.NewOFTable(35, "ServiceClassifier")
-	SessionAffinityTable         = binding.NewOFTable(40, "SessionAffinity")
-	DNATTable                    = binding.NewOFTable(40, "DNAT(SessionAffinity)")
-	ServiceLBTable               = binding.NewOFTable(41, "ServiceLB")
-	EndpointDNATTable            = binding.NewOFTable(42, "EndpointDNAT")
-	AntreaPolicyEgressRuleTable  = binding.NewOFTable(45, "AntreaPolicyEgressRule")
-	DefaultTierEgressRuleTable   = binding.NewOFTable(49, "DefaultTierEgressRule")
-	EgressRuleTable              = binding.NewOFTable(50, "EgressRule")
-	EgressDefaultTable           = binding.NewOFTable(60, "EgressDefaultRule")
-	EgressMetricTable            = binding.NewOFTable(61, "EgressMetric")
-	L3ForwardingTable            = binding.NewOFTable(70, "L3Forwarding")
-	SNATTable                    = binding.NewOFTable(71, "SNAT")
-	L3DecTTLTable                = binding.NewOFTable(72, "IPTTLDec")
-	L2ForwardingCalcTable        = binding.NewOFTable(80, "L2Forwarding")
-	AntreaPolicyIngressRuleTable = binding.NewOFTable(85, "AntreaPolicyIngressRule")
-	DefaultTierIngressRuleTable  = binding.NewOFTable(89, "DefaultTierIngressRule")
-	IngressRuleTable             = binding.NewOFTable(90, "IngressRule")
-	IngressDefaultTable          = binding.NewOFTable(100, "IngressDefaultRule")
-	IngressMetricTable           = binding.NewOFTable(101, "IngressMetric")
-	ConntrackCommitTable         = binding.NewOFTable(105, "ConntrackCommit")
-	ServiceConntrackCommitTable  = binding.NewOFTable(106, "ServiceConntrackCommit")
-	HairpinSNATTable             = binding.NewOFTable(108, "HairpinSNAT")
-	L2ForwardingOutTable         = binding.NewOFTable(110, "Output")
+	// PipelineClassifierTable is table 0. Packets are forwarded to different pipelines in this table.
+	PipelineClassifierTable = newFeatureTable("PipelineClassifier", 0xff, 0)
+
+	// Pipeline of ARP is used to process ARP packets.
+	// ValidationStage
+	ARPSpoofGuardTable = newFeatureTable("ARPSpoofGuard", 0x7f, binding.ValidationStage)
+
+	// OutputStage
+	ARPResponderTable = newFeatureTable("ARPResponder", 0x7f, binding.OutputStage)
+
+	// Pipeline of IP is used to process IPv4/IPv6 packets.
+	// ClassifierStage
+	ClassifierTable = newFeatureTable("Classification", 0x7f, binding.ClassifierStage)
+	UplinkTable     = newFeatureTable("Uplink", 0x6f, binding.ClassifierStage)
+
+	// ValidationStage
+	SpoofGuardTable          = newFeatureTable("SpoofGuard", 0x7f, binding.ValidationStage)
+	IPv6Table                = newFeatureTable("IPv6", 0x6f, binding.ValidationStage)
+	MulticastClassifierTable = newFeatureTable("MulticastClassifier", 0x5f, binding.ValidationStage)
+
+	// ConntrackStateStage
+	SNATConntrackTable  = newFeatureTable("SNATConntrackZone", 0x7f, binding.ConntrackStateStage)
+	ConntrackTable      = newFeatureTable("ConntrackZone", 0x6f, binding.ConntrackStateStage)
+	ConntrackStateTable = newFeatureTable("ConntrackState", 0x5f, binding.ConntrackStateStage)
+
+	// EgressSecurityStage
+	AntreaPolicyEgressRuleTable = newFeatureTable("AntreaPolicyEgressRule", 0x7f, binding.EgressSecurityStage)
+	EgressRuleTable             = newFeatureTable("EgressRule", 0x6f, binding.EgressSecurityStage)
+	EgressDefaultTable          = newFeatureTable("EgressDefaultRule", 0x5f, binding.EgressSecurityStage)
+	EgressMetricTable           = newFeatureTable("EgressMetric", 0x4f, binding.EgressSecurityStage)
+
+	// PreRoutingStage
+	// AntreaProxy is enabled.
+	NodePortProbeTable   = newFeatureTable("NodePortProbe", 0x7f, binding.PreRoutingStage)
+	SessionAffinityTable = newFeatureTable("SessionAffinity", 0x6f, binding.PreRoutingStage)
+	ServiceLBTable       = newFeatureTable("ServiceLB", 0x5f, binding.PreRoutingStage)
+	EndpointDNATTable    = newFeatureTable("EndpointDNAT", 0x4f, binding.PreRoutingStage)
+	// AntreaProxy is disabled.
+	DNATTable = newFeatureTable("DNAT", 0x7f, binding.PreRoutingStage)
+
+	// RoutingStage
+	L3ForwardingTable       = newFeatureTable("L3Forwarding", 0x7f, binding.RoutingStage)
+	ServiceHairpinMarkTable = newFeatureTable("ServiceHairpinMark", 0x6f, binding.RoutingStage)
+	L3DecTTLTable           = newFeatureTable("IPTTLDec", 0x5f, binding.RoutingStage)
+
+	// PostRoutingStage
+	SNATTable                = newFeatureTable("SNAT", 0x7f, binding.PostRoutingStage)
+	SNATConntrackCommitTable = newFeatureTable("SNATConntrackCommit", 0x6f, binding.PostRoutingStage)
+
+	// SwitchingStage
+	L2ForwardingCalcTable = newFeatureTable("L2Forwarding", 0x7f, binding.SwitchingStage)
+
+	// IngressSecurityStage
+	IngressClassifierTable       = newFeatureTable("IngressClassifier", 0x7f, binding.IngressSecurityStage)
+	AntreaPolicyIngressRuleTable = newFeatureTable("AntreaPolicyIngressRule", 0x6f, binding.IngressSecurityStage)
+	IngressRuleTable             = newFeatureTable("IngressRule", 0x5f, binding.IngressSecurityStage)
+	IngressDefaultTable          = newFeatureTable("IngressDefaultRule", 0x4f, binding.IngressSecurityStage)
+	IngressMetricTable           = newFeatureTable("IngressMetric", 0x3f, binding.IngressSecurityStage)
+
+	// ConntrackStage
+	ConntrackCommitTable = newFeatureTable("ConntrackCommit", 0x7f, binding.ConntrackStage)
+
+	// OutputStage
+	L2ForwardingOutTable = newFeatureTable("L2ForwardingOut", 0x7f, binding.OutputStage)
+
+	// Pipeline of Multicast is used to process multicast packets.
+	// RoutingStage
+	MulticastTable = newFeatureTable("Multicast", 0x7f, binding.RoutingStage)
 
 	// Flow priority level
 	priorityHigh            = uint16(210)
@@ -123,32 +158,28 @@ func (a ofAction) String() string {
 var (
 	// egressTables map records all IDs of tables related to
 	// egress rules.
-	egressTables = map[uint8]struct{}{
-		AntreaPolicyEgressRuleTable.GetID(): {},
-		EgressRuleTable.GetID():             {},
-		EgressDefaultTable.GetID():          {},
-	}
+	egressTables = map[uint8]struct{}{}
 
-	// ofTableCache caches the OpenFlow tables used in the pipeline, and it supports using the table ID and name as the index to query the OpenFlow table.
-	ofTableCache = cache.NewIndexer(tableIDKeyFunc, cache.Indexers{tableNameIndex: tableNameIndexFunc})
+	// tableCache caches the OpenFlow tables used in the pipeline, and it supports using the table ID and name as the index to query the OpenFlow table.
+	tableCache = cache.NewIndexer(tableIDKeyFunc, cache.Indexers{tableNameIndex: tableNameIndexFunc})
 )
 
 func tableNameIndexFunc(obj interface{}) ([]string, error) {
-	ofTable := obj.(binding.Table)
-	return []string{ofTable.GetName()}, nil
+	ft := obj.(*FeatureTable)
+	return []string{ft.GetName()}, nil
 }
 
 func tableIDKeyFunc(obj interface{}) (string, error) {
-	ofTable := obj.(binding.Table)
-	return fmt.Sprintf("%d", ofTable.GetID()), nil
+	ft := obj.(*FeatureTable)
+	return fmt.Sprintf("%d", ft.GetID()), nil
 }
 
 func getTableByID(id uint8) binding.Table {
-	obj, exists, _ := ofTableCache.GetByKey(fmt.Sprintf("%d", id))
+	obj, exists, _ := tableCache.GetByKey(fmt.Sprintf("%d", id))
 	if !exists {
 		return nil
 	}
-	return obj.(binding.Table)
+	return obj.(*FeatureTable).ofTable
 }
 
 // GetFlowTableName returns the flow table name given the table ID. An empty
@@ -165,7 +196,7 @@ func GetFlowTableName(tableID uint8) string {
 // returns the flow table number if the table is found. Otherwise TableIDAll is
 // returned if the table cannot be found.
 func GetFlowTableID(tableName string) uint8 {
-	objs, _ := ofTableCache.ByIndex(tableNameIndex, tableName)
+	objs, _ := tableCache.ByIndex(tableNameIndex, tableName)
 	if len(objs) == 0 {
 		return binding.TableIDAll
 	}
@@ -174,36 +205,36 @@ func GetFlowTableID(tableName string) uint8 {
 
 func GetTableList() []binding.Table {
 	tables := make([]binding.Table, 0)
-	for _, obj := range ofTableCache.List() {
+	for _, obj := range tableCache.List() {
 		t := obj.(binding.Table)
 		tables = append(tables, t)
 	}
 	return tables
 }
 
-func GetAntreaPolicyEgressTables() []binding.Table {
-	return []binding.Table{
+func GetAntreaPolicyEgressTables() []*FeatureTable {
+	return []*FeatureTable{
 		AntreaPolicyEgressRuleTable,
 		EgressDefaultTable,
 	}
 }
 
-func GetAntreaPolicyIngressTables() []binding.Table {
-	return []binding.Table{
+func GetAntreaPolicyIngressTables() []*FeatureTable {
+	return []*FeatureTable{
 		AntreaPolicyIngressRuleTable,
 		IngressDefaultTable,
 	}
 }
 
-func GetAntreaPolicyBaselineTierTables() []binding.Table {
-	return []binding.Table{
+func GetAntreaPolicyBaselineTierTables() []*FeatureTable {
+	return []*FeatureTable{
 		EgressDefaultTable,
 		IngressDefaultTable,
 	}
 }
 
-func GetAntreaPolicyMultiTierTables() []binding.Table {
-	return []binding.Table{
+func GetAntreaPolicyMultiTierTables() []*FeatureTable {
+	return []*FeatureTable{
 		AntreaPolicyEgressRuleTable,
 		AntreaPolicyIngressRuleTable,
 	}
@@ -299,24 +330,20 @@ type client struct {
 	roundInfo             types.RoundInfo
 	cookieAllocator       cookie.Allocator
 	bridge                binding.Bridge
-	egressEntryTable      uint8
-	ingressEntryTable     uint8
-	// Flow caches for corresponding deletions.
-	nodeFlowCache, podFlowCache, serviceFlowCache, snatFlowCache, tfFlowCache, mcastFlowCache *flowCategoryCache
-	// "fixed" flows installed by the agent after initialization and which do not change during
-	// the lifetime of the client.
-	gatewayFlows, defaultServiceFlows, defaultTunnelFlows, hostNetworkingFlows []binding.Flow
+
+	featurePodConnectivity *featurePodConnectivity
+	featureService         *featureService
+	featureEgress          *featureEgress
+	featureNetworkPolicy   *featureNetworkPolicy
+	featureMulticast       *featureMulticast
+	featureTraceflow       *featureTraceflow
+
+	pipelines   map[pipeline]binding.Pipeline
+	ipProtocols []binding.Protocol
+
 	// ofEntryOperations is a wrapper interface for OpenFlow entry Add / Modify / Delete operations. It
 	// enables convenient mocking in unit tests.
 	ofEntryOperations OFEntryOperations
-	// policyCache is a storage that supports listing policyRuleConjunction with different indexers.
-	// It's guaranteed that one policyRuleConjunction is processed by at most one goroutine at any given time.
-	policyCache       cache.Indexer
-	conjMatchFlowLock sync.Mutex // Lock for access globalConjMatchFlowCache
-	groupCache        sync.Map
-	// globalConjMatchFlowCache is a global map for conjMatchFlowContext. The key is a string generated from the
-	// conjMatchFlowContext.
-	globalConjMatchFlowCache map[string]*conjMatchFlowContext
 	// replayMutex provides exclusive access to the OFSwitch to the ReplayFlows method.
 	replayMutex   sync.RWMutex
 	nodeConfig    *config.NodeConfig
@@ -327,11 +354,6 @@ type client struct {
 	ovsDatapathType ovsconfig.OVSDatapathType
 	// ovsMetersAreSupported indicates whether the OVS datapath supports OpenFlow meters.
 	ovsMetersAreSupported bool
-	// packetInHandlers stores handler to process PacketIn event. Each packetin reason can have multiple handlers registered.
-	// When a packetin arrives, openflow send packet to registered handlers in this map.
-	packetInHandlers map[uint8]map[string]PacketInHandler
-	// Supported IP Protocols (IP or IPv6) on the current Node.
-	ipProtocols []binding.Protocol
 	// ovsctlClient is the interface for executing OVS "ovs-ofctl" and "ovs-appctl" commands.
 	ovsctlClient ovsctl.OVSCtlClient
 	// deterministic represents whether to generate flows deterministically.
@@ -438,25 +460,51 @@ func (c *client) DeleteOFEntries(ofEntries []binding.OFEntry) error {
 	return c.changeOFEntries(ofEntries, del)
 }
 
-// defaultFlows generates the default flows of all tables.
-func (c *client) defaultFlows() (flows []binding.Flow) {
-	for _, obj := range ofTableCache.List() {
-		table := obj.(binding.Table)
-		flowBuilder := table.BuildFlow(priorityMiss)
-		switch table.GetMissAction() {
-		case binding.TableMissActionNext:
-			flowBuilder = flowBuilder.Action().GotoTable(table.GetNext())
-		case binding.TableMissActionNormal:
-			flowBuilder = flowBuilder.Action().Normal()
-		case binding.TableMissActionDrop:
-			flowBuilder = flowBuilder.Action().Drop()
-		case binding.TableMissActionNone:
-			fallthrough
-		default:
-			continue
+func (c *client) defaultFlows(category cookie.Category) []binding.Flow {
+	cookieID := c.cookieAllocator.Request(category).Raw()
+	var flows []binding.Flow
+	for pipelineProto, pipeline := range c.pipelines {
+		// This generates the default flow for every table for a pipeline.
+		for _, table := range pipeline.ListAllTables() {
+			flowBuilder := table.BuildFlow(priorityMiss).Cookie(cookieID)
+			switch table.GetMissAction() {
+			case binding.TableMissActionNext:
+				flowBuilder = flowBuilder.Action().NextTable()
+			case binding.TableMissActionNormal:
+				flowBuilder = flowBuilder.Action().Normal()
+			case binding.TableMissActionDrop:
+				flowBuilder = flowBuilder.Action().Drop()
+			case binding.TableMissActionNone:
+				fallthrough
+			default:
+				continue
+			}
+			flows = append(flows, flowBuilder.Done())
 		}
-		flows = append(flows, flowBuilder.Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).Done())
+
+		// This generates the flows to forward packets to different pipelines.
+		switch pipelineProto {
+		case pipelineIP:
+			// This generates the flow to forward packets to pipeline for IP in PipelineClassifierTable.
+			for _, ipProtocol := range c.ipProtocols {
+				flows = append(flows, pipelineClassifyFlow(cookieID, ipProtocol, pipeline))
+			}
+		case pipelineARP:
+			// This generates the flow to forward packets to pipeline for ARP in PipelineClassifierTable.
+			flows = append(flows, pipelineClassifyFlow(cookieID, binding.ProtocolARP, pipeline))
+		case pipelineMulticast:
+			// This generates the flow to forward packets to pipeline for multicast in MulticastClassifierTable.
+			// Note that, the table is in Validation Stage of pipeline for IP. In another word, pipeline for multicast
+			// shares  with pipeline for IP.
+			flows = append(flows, multicastPipelineClassifyFlow(cookieID, pipeline))
+		}
 	}
+	// This generates default the flow for PipelineClassifierTable.
+	flows = append(flows, PipelineClassifierTable.ofTable.BuildFlow(priorityMiss).
+		Cookie(c.cookieAllocator.Request(category).Raw()).
+		Action().Drop().
+		Done())
+
 	return flows
 }
 
@@ -2545,70 +2593,91 @@ func (c *client) genPacketInMeter(meterID binding.MeterIDType, rate uint32) bind
 	return meter
 }
 
-func (c *client) generatePipeline() {
-	c.createOFTable(ClassifierTable, SpoofGuardTable.GetID(), binding.TableMissActionDrop)
-	c.createOFTable(SpoofGuardTable, ConntrackTable.GetID(), binding.TableMissActionDrop)
-	c.createOFTable(IPv6Table, ConntrackTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(arpResponderTable, binding.LastTableID, binding.TableMissActionDrop)
-	c.createOFTable(ConntrackTable, ConntrackStateTable.GetID(), binding.TableMissActionNone)
-	c.createOFTable(ConntrackStateTable, DNATTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(EgressRuleTable, EgressDefaultTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(EgressDefaultTable, EgressMetricTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(EgressMetricTable, L3ForwardingTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(L3ForwardingTable, L2ForwardingCalcTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(L3DecTTLTable, L2ForwardingCalcTable.GetID(), binding.TableMissActionNext)
-	// Packets from L2ForwardingCalcTable should be forwarded to IngressMetricTable by default to collect ingress stats.
-	c.createOFTable(L2ForwardingCalcTable, IngressMetricTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(IngressRuleTable, IngressDefaultTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(IngressDefaultTable, IngressMetricTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(IngressMetricTable, ConntrackCommitTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(ConntrackCommitTable, L2ForwardingOutTable.GetID(), binding.TableMissActionNext)
-	c.createOFTable(L2ForwardingOutTable, binding.LastTableID, binding.TableMissActionDrop)
-	if c.enableProxy {
-		SpoofGuardTable.SetNext(ServiceHairpinTable.GetID())
-		IPv6Table.SetNext(ServiceHairpinTable.GetID())
-		ConntrackStateTable.SetNext(EndpointDNATTable.GetID())
-		if c.proxyAll {
-			ServiceHairpinTable = c.createOFTable(ServiceHairpinTable, ServiceConntrackTable.GetID(), binding.TableMissActionNext)
-			ServiceConntrackTable = c.createOFTable(ServiceConntrackTable, ConntrackTable.GetID(), binding.TableMissActionNext)
-			ServiceClassifierTable = c.createOFTable(ServiceClassifierTable, binding.LastTableID, binding.TableMissActionNone)
-			ServiceConntrackCommitTable = c.createOFTable(ServiceConntrackCommitTable, HairpinSNATTable.GetID(), binding.TableMissActionNext)
-		} else {
-			ServiceHairpinTable = c.createOFTable(ServiceHairpinTable, ConntrackTable.GetID(), binding.TableMissActionNext)
+func generatePipeline(templates []*featureTemplate) binding.Pipeline {
+	pipelineID := binding.NewPipelineID()
+	sortedOFTableMap := make(map[binding.StageID][]binding.Table)
+
+	// PipelineClassifierTable ID is always 0, and it is the first table for all pipelines. Create PipelineClassifierTable
+	// on the bridge when building a pipeline.
+	if PipelineClassifierTable.ofTable == nil {
+		PipelineClassifierTable.ofTable = binding.NewOFTable(binding.NextTableID(), PipelineClassifierTable.name, 0, binding.AllPipelines)
+	}
+
+	// Iterate each stage to get a sorted FeatureTable list from every feature template.
+	for stage := binding.FirstStage; stage <= binding.LastStage; stage++ {
+		// tableMap is used to store all declared FeatureTables in a stage. As a FeatureTable can be declared by multiple
+		// features, a map is used to avoid duplication.
+		tableMap := make(map[*FeatureTable]struct{})
+		for _, template := range templates {
+			if tables, ok := template.stageTables[stage]; ok {
+				for _, table := range tables {
+					if table.stage != stage {
+						klog.Errorf("table %s belongs to stage %d, and it should not be declared in stage %d", table.name, table.stage, stage)
+						continue
+					}
+					if _, exist := tableMap[table]; !exist {
+						tableMap[table] = struct{}{}
+					}
+				}
+			}
 		}
-		SessionAffinityTable = c.createOFTable(SessionAffinityTable, binding.LastTableID, binding.TableMissActionNone)
-		ServiceLBTable = c.createOFTable(ServiceLBTable, EndpointDNATTable.GetID(), binding.TableMissActionNext)
-		EndpointDNATTable = c.createOFTable(EndpointDNATTable, c.egressEntryTable, binding.TableMissActionNext)
-		HairpinSNATTable = c.createOFTable(HairpinSNATTable, L2ForwardingOutTable.GetID(), binding.TableMissActionNext)
-		ConntrackCommitTable.SetNext(HairpinSNATTable.GetID())
-	} else {
-		c.createOFTable(DNATTable, c.egressEntryTable, binding.TableMissActionNext)
+		if len(tableMap) == 0 {
+			continue
+		}
+
+		// Use a slice to store all declared FeatureTables in a stage and sort them.
+		tableList := make([]*FeatureTable, 0, len(tableMap))
+		for tr := range tableMap {
+			tableList = append(tableList, tr)
+		}
+		sort.Slice(tableList, func(i, j int) bool {
+			return tableList[i].priority > tableList[j].priority
+		})
+
+		ofTableList := make([]binding.Table, 0, len(tableList))
+		for _, table := range tableList {
+			// Generate a sequencing ID for the flow table.
+			tableID := binding.NextTableID()
+			// Initialize a flow table.
+			table.ofTable = binding.NewOFTable(tableID, table.name, stage, pipelineID)
+			ofTableList = append(ofTableList, table.ofTable)
+			if _, exists, _ := tableCache.GetByKey(fmt.Sprintf("%d", table.GetID())); !exists {
+				tableCache.Add(table)
+			}
+		}
+		sortedOFTableMap[stage] = ofTableList
 	}
-	// The default SNAT is implemented with OVS on Windows.
-	if c.enableEgress || runtime.IsWindowsPlatform() {
-		c.createOFTable(SNATTable, L2ForwardingCalcTable.GetID(), binding.TableMissActionNext)
-	}
-	if runtime.IsWindowsPlatform() || c.connectUplinkToBridge {
-		c.createOFTable(UplinkTable, SpoofGuardTable.GetID(), binding.TableMissActionNone)
-	}
-	if c.enableAntreaPolicy {
-		c.createOFTable(AntreaPolicyEgressRuleTable, EgressRuleTable.GetID(), binding.TableMissActionNext)
-		c.createOFTable(AntreaPolicyIngressRuleTable, IngressRuleTable.GetID(), binding.TableMissActionNext)
-	}
-	if c.enableMulticast {
-		SpoofGuardTable.SetNext(MulticastTable.GetID())
-		c.createOFTable(MulticastTable, ConntrackTable.GetID(), binding.TableMissActionNext)
-		if c.enableProxy {
-			MulticastTable.SetNext(ServiceHairpinTable.GetID())
+	return binding.NewPipeline(pipelineID, sortedOFTableMap)
+}
+
+func createPipelinesOnBridge(bridge binding.Bridge, pipelines map[pipeline]binding.Pipeline) {
+	bridge.CreateTable(PipelineClassifierTable.ofTable, binding.LastTableID, binding.TableMissActionDrop)
+	for _, pipeline := range pipelines {
+		tables := pipeline.ListAllTables()
+		for i := range tables {
+			var nextID uint8
+			var missAction binding.MissActionType
+			if pipeline.IsLastTable(tables[i]) {
+				nextID = binding.LastTableID
+				missAction = binding.TableMissActionDrop
+			} else {
+				nextID = tables[i+1].GetID()
+				missAction = binding.TableMissActionNext
+			}
+			tables[i].SetNext(nextID)
+			tables[i].SetMissAction(missAction)
+			bridge.CreateTable(tables[i], nextID, missAction)
 		}
 	}
 }
 
-// createOFTable sets the missAction and the next table ID of the given table according to the pipeline. Then it creates the table on the bridge. At last, it adds the table into the ofTableCache.
-func (c *client) createOFTable(table binding.Table, nextID uint8, missAction binding.MissActionType) binding.Table {
-	c.bridge.CreateTable(table, nextID, missAction)
-	ofTableCache.Add(table)
-	return table
+func pipelineClassifyFlow(cookieID uint64, protocol binding.Protocol, pipeline binding.Pipeline) binding.Flow {
+	targetTable := pipeline.GetFirstTable()
+	return PipelineClassifierTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(cookieID).
+		MatchProtocol(protocol).
+		Action().ResubmitToTables(targetTable.GetID()).
+		Done()
 }
 
 // igmpPktInFlows sets reg0[28] to mark the IGMP packet in MulticastTable and sends it to antrea-agent on MulticastTable.
@@ -2669,44 +2738,21 @@ func NewClient(bridgeName string,
 	connectUplinkToBridge bool,
 	enableMulticast bool) Client {
 	bridge := binding.NewOFBridge(bridgeName, mgmtAddr)
-	policyCache := cache.NewIndexer(
-		policyConjKeyFunc,
-		cache.Indexers{priorityIndex: priorityIndexFunc},
-	)
 	c := &client{
-		bridge:                   bridge,
-		enableProxy:              enableProxy,
-		proxyAll:                 proxyAll,
-		enableAntreaPolicy:       enableAntreaPolicy,
-		enableDenyTracking:       enableDenyTracking,
-		enableEgress:             enableEgress,
-		enableMulticast:          enableMulticast,
-		connectUplinkToBridge:    connectUplinkToBridge,
-		nodeFlowCache:            newFlowCategoryCache(),
-		podFlowCache:             newFlowCategoryCache(),
-		serviceFlowCache:         newFlowCategoryCache(),
-		tfFlowCache:              newFlowCategoryCache(),
-		policyCache:              policyCache,
-		groupCache:               sync.Map{},
-		globalConjMatchFlowCache: map[string]*conjMatchFlowContext{},
-		packetInHandlers:         map[uint8]map[string]PacketInHandler{},
-		ovsctlClient:             ovsctl.NewClient(bridgeName),
-		ovsDatapathType:          ovsDatapathType,
-		ovsMetersAreSupported:    ovsMetersAreSupported(ovsDatapathType),
+		bridge:                bridge,
+		enableProxy:           enableProxy,
+		proxyAll:              proxyAll,
+		enableAntreaPolicy:    enableAntreaPolicy,
+		enableDenyTracking:    enableDenyTracking,
+		enableEgress:          enableEgress,
+		enableMulticast:       enableMulticast,
+		connectUplinkToBridge: connectUplinkToBridge,
+		pipelines:             make(map[pipeline]binding.Pipeline),
+		ovsctlClient:          ovsctl.NewClient(bridgeName),
+		ovsDatapathType:       ovsDatapathType,
+		ovsMetersAreSupported: ovsMetersAreSupported(ovsDatapathType),
 	}
 	c.ofEntryOperations = c
-	if enableAntreaPolicy {
-		c.egressEntryTable, c.ingressEntryTable = AntreaPolicyEgressRuleTable.GetID(), AntreaPolicyIngressRuleTable.GetID()
-	} else {
-		c.egressEntryTable, c.ingressEntryTable = EgressRuleTable.GetID(), IngressRuleTable.GetID()
-	}
-	if enableEgress {
-		c.snatFlowCache = newFlowCategoryCache()
-	}
-	if enableMulticast {
-		c.mcastFlowCache = newFlowCategoryCache()
-	}
-	c.generatePipeline()
 	return c
 }
 

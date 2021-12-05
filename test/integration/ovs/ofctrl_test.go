@@ -66,13 +66,14 @@ var (
 	peerGW           = net.ParseIP("192.168.2.1")
 	vMAC, _          = net.ParseMAC("aa:bb:cc:dd:ee:ff")
 
-	ipDSCP = uint8(10)
+	ipDSCP     = uint8(10)
+	pipelineID = binding.NewPipelineID()
 
-	t0 = binding.NewOFTable(0, "t0")
-	t1 = binding.NewOFTable(1, "t1")
-	t2 = binding.NewOFTable(2, "t2")
-	t3 = binding.NewOFTable(3, "t3")
-	t4 = binding.NewOFTable(4, "t4")
+	t0 = binding.NewOFTable(0, "t0", binding.ClassifierStage, pipelineID)
+	t1 = binding.NewOFTable(1, "t1", binding.ClassifierStage, pipelineID)
+	t2 = binding.NewOFTable(2, "t2", binding.ClassifierStage, pipelineID)
+	t3 = binding.NewOFTable(3, "t3", binding.ClassifierStage, pipelineID)
+	t4 = binding.NewOFTable(4, "t4", binding.ClassifierStage, pipelineID)
 )
 
 func newOFBridge(brName string) binding.Bridge {
@@ -128,7 +129,7 @@ func prepareOverlapFlows(table binding.Table, ipStr string, sameCookie bool) ([]
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 			Cookie(cookie2).
 			MatchSrcIP(srcIP).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 	}
 	expectFlows := []*ExpectFlow{
@@ -441,7 +442,7 @@ func TestBundleErrorWhenOVSRestart(t *testing.T) {
 				flows := []binding.Flow{table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 					Cookie(getCookieID()).
 					MatchInPort(uint32(count + 1)).
-					Action().GotoTable(table.GetNext()).
+					Action().NextTable().
 					Done()}
 				err = bridge.AddFlowsInBundle(flows, nil, nil)
 				if err != nil {
@@ -643,7 +644,7 @@ func TestPacketOutIn(t *testing.T) {
 		Action().LoadToRegField(reg2Field, reg2Data).
 		Action().LoadToRegField(reg3Field, reg3Data).
 		Action().SetTunnelDst(tunDst).
-		Action().ResubmitToTable(table0.GetNext()).
+		Action().ResubmitToTables(table0.GetNext()).
 		Done()
 	flow1 := table1.BuildFlow(100).
 		MatchSrcMAC(srcMAC).MatchDstMAC(dstcMAC).
@@ -680,14 +681,14 @@ func TestTLVMap(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	flow1 := table.BuildFlow(100).
 		MatchProtocol(binding.ProtocolIP).MatchTunMetadata(0, 0x1234).
-		Action().ResubmitToTable(table.GetNext()).
+		Action().NextTable().
 		Done()
 	err = bridge.AddFlowsInBundle([]binding.Flow{flow1}, nil, nil)
 	require.Nil(t, err)
 	expectedFlows := []*ExpectFlow{
 		{
 			MatchStr: "priority=100,ip,tun_metadata0=0x1234",
-			ActStr:   fmt.Sprintf("resubmit(,%d)", table.GetNext()),
+			ActStr:   fmt.Sprintf("goto_table:%d", table.GetNext()),
 		},
 	}
 	ovsCtlClient := ovsctl.NewClient(br)
@@ -713,14 +714,14 @@ func TestMoveTunMetadata(t *testing.T) {
 	flow1 := table.BuildFlow(100).
 		MatchProtocol(binding.ProtocolIP).MatchTunMetadata(0, 0x1234).
 		Action().MoveRange("NXM_NX_TUN_METADATA0", "NXM_NX_REG0", binding.Range{28, 31}, binding.Range{28, 31}).
-		Action().ResubmitToTable(table.GetNext()).
+		Action().NextTable().
 		Done()
 	err = bridge.AddFlowsInBundle([]binding.Flow{flow1}, nil, nil)
 	require.Nil(t, err)
 	expectedFlows := []*ExpectFlow{
 		{
 			MatchStr: "priority=100,ip,tun_metadata0=0x1234",
-			ActStr:   fmt.Sprintf("move:NXM_NX_TUN_METADATA0[28..31]->NXM_NX_REG0[28..31],resubmit(,%d)", table.GetNext()),
+			ActStr:   fmt.Sprintf("move:NXM_NX_TUN_METADATA0[28..31]->NXM_NX_REG0[28..31],goto_table:%d", table.GetNext()),
 		},
 	}
 	ovsCtlClient := ovsctl.NewClient(br)
@@ -754,7 +755,7 @@ func TestFlowWithCTMatchers(t *testing.T) {
 		MatchCTSrcPort(ctPortSrc).
 		MatchCTDstPort(ctPortDst).
 		MatchCTProtocol(binding.ProtocolTCP).
-		Action().ResubmitToTable(table.GetNext()).
+		Action().NextTable().
 		Done()
 	flow2 := table.BuildFlow(priority).
 		MatchProtocol(binding.ProtocolIP).
@@ -762,17 +763,17 @@ func TestFlowWithCTMatchers(t *testing.T) {
 		MatchCTSrcIPNet(*ctIPSrcNet).
 		MatchCTDstIPNet(*ctIPDstNet).
 		MatchCTProtocol(binding.ProtocolTCP).
-		Action().ResubmitToTable(table.GetNext()).
+		Action().NextTable().
 		Done()
 	expectFlows := []*ExpectFlow{
 		{fmt.Sprintf("priority=%d,ct_state=+new,ct_nw_src=%s,ct_nw_dst=%s,ct_nw_proto=6,ct_tp_src=%d,ct_tp_dst=%d,ip",
 			priority, ctIPSrc.String(), ctIPDst.String(), ctPortSrc, ctPortDst),
-			fmt.Sprintf("resubmit(,%d)", table.GetNext()),
+			fmt.Sprintf("goto_table:%d", table.GetNext()),
 		},
 		{
 			fmt.Sprintf("priority=%d,ct_state=+est,ct_nw_src=%s,ct_nw_dst=%s,ct_nw_proto=6,ip",
 				priority, ctIPSrcNet.String(), ctIPDstNet.String()),
-			fmt.Sprintf("resubmit(,%d)", table.GetNext()),
+			fmt.Sprintf("goto_table:%d", table.GetNext()),
 		},
 	}
 	for _, f := range []binding.Flow{flow1, flow2} {
@@ -808,7 +809,7 @@ func TestNoteAction(t *testing.T) {
 		MatchProtocol(binding.ProtocolIP).
 		MatchSrcIP(srcIP).
 		Action().Note(testNotes).
-		Action().GotoTable(table.GetNext()).
+		Action().NextTable().
 		Done()
 
 	convertNoteToHex := func(note string) string {
@@ -855,21 +856,21 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			Cookie(getCookieID()).
 			MatchInPort(podOFport).
 			Action().LoadRegMark(fromLocalMark).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolARP).
 			Cookie(getCookieID()).
 			MatchInPort(podOFport).
 			MatchARPSha(podMAC).
 			MatchARPSpa(podIP).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 			Cookie(getCookieID()).
 			MatchInPort(podOFport).
 			MatchSrcMAC(podMAC).
 			MatchSrcIP(podIP).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolARP).
 			Cookie(getCookieID()).
@@ -896,7 +897,7 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			LoadFieldToField(regField0, regField0).
 			LoadRegMark(mark1).
 			Done(). // Finish learn action.
-			Action().ResubmitToTable(table.GetID()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 			Cookie(getCookieID()).
@@ -907,7 +908,7 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			MatchRegMark(fromGatewayMark).
 			MatchCTMark(gatewayCTMark).
 			MatchCTStateNew(false).MatchCTStateTrk(true).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 			Cookie(getCookieID()).
@@ -924,7 +925,7 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			MatchCTMark(gatewayCTMark).
 			MatchCTStateNew(false).MatchCTStateTrk(true).
 			Action().LoadRange(binding.NxmFieldDstMAC, gwMACData, &binding.Range{0, 47}).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 			Cookie(getCookieID()).
@@ -943,7 +944,7 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			Action().SetSrcMAC(gwMAC).
 			Action().SetDstMAC(podMAC).
 			Action().DecTTL().
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 			Cookie(getCookieID()).
@@ -952,7 +953,7 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			Action().SetSrcMAC(gwMAC).
 			Action().SetDstMAC(vMAC).
 			Action().SetTunnelDst(tunnelPeer).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIPv6).
 			Cookie(getCookieID()).
@@ -961,20 +962,20 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			Action().SetSrcMAC(gwMAC).
 			Action().SetDstMAC(vMAC).
 			Action().SetTunnelDst(tunnelPeerIPv6).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolIP).
 			Cookie(getCookieID()).
 			MatchDstIP(gwIP).
 			Action().SetDstMAC(gwMAC).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).
 			Cookie(getCookieID()).
 			MatchDstMAC(podMAC).
 			Action().LoadToRegField(portCacheField, podOFport).
 			Action().LoadRegMark(portFoundMark).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal).
 			Cookie(getCookieID()).
@@ -991,7 +992,7 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 			MatchProtocol(binding.ProtocolIP).
 			MatchSrcIP(podIP).
 			MatchIPDSCP(ipDSCP).
-			Action().GotoTable(table.GetNext()).
+			Action().NextTable().
 			Done(),
 		table.BuildFlow(priorityNormal+20).MatchProtocol(binding.ProtocolTCP).Cookie(getCookieID()).MatchDstPort(uint16(8080), nil).
 			Action().Conjunction(uint32(1001), uint8(3), uint8(3)).Done(),
@@ -1004,9 +1005,9 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 		table.BuildFlow(priorityNormal+20).MatchProtocol(binding.ProtocolIP).Cookie(getCookieID()).MatchRegFieldWithValue(portCacheField, podOFport).
 			Action().Conjunction(uint32(1001), uint8(2), uint8(3)).Done(),
 		table.BuildFlow(priorityNormal+20).MatchProtocol(binding.ProtocolIP).Cookie(getCookieID()).MatchConjID(1001).
-			Action().GotoTable(table.GetNext()).Done(),
+			Action().NextTable().Done(),
 		table.BuildFlow(priorityNormal+20).MatchProtocol(binding.ProtocolIP).Cookie(getCookieID()).MatchConjID(1001).MatchSrcIP(gwIP).
-			Action().GotoTable(table.GetNext()).Done(),
+			Action().NextTable().Done(),
 	)
 
 	gotoTableAction := fmt.Sprintf("goto_table:%d", table.GetNext())
@@ -1017,7 +1018,7 @@ func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {
 		&ExpectFlow{"priority=200,ip,in_port=3,dl_src=aa:aa:aa:aa:aa:13,nw_src=192.168.1.3", gotoTableAction},
 		&ExpectFlow{"priority=200,arp,arp_tpa=192.168.2.1,arp_op=1", "move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],set_field:aa:bb:cc:dd:ee:ff->eth_src,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],set_field:aa:bb:cc:dd:ee:ff->arp_sha,move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],set_field:192.168.2.1->arp_spa,IN_PORT"},
 		&ExpectFlow{"priority=190,arp", "NORMAL"},
-		&ExpectFlow{"priority=200,tcp", fmt.Sprintf("learn(table=%d,idle_timeout=10,priority=190,delete_learned,cookie=0x1,eth_type=0x800,nw_proto=6,NXM_OF_TCP_DST[],NXM_NX_REG0[0..15]=0xfff,load:NXM_NX_REG0[0..15]->NXM_NX_REG0[0..15],load:0xffe->NXM_NX_REG0[16..31]),resubmit(,%d)", table.GetID(), table.GetID())},
+		&ExpectFlow{"priority=200,tcp", fmt.Sprintf("learn(table=%d,idle_timeout=10,priority=190,delete_learned,cookie=0x1,eth_type=0x800,nw_proto=6,NXM_OF_TCP_DST[],NXM_NX_REG0[0..15]=0xfff,load:NXM_NX_REG0[0..15]->NXM_NX_REG0[0..15],load:0xffe->NXM_NX_REG0[16..31]),goto_table:%d", table.GetID(), table.GetNext())},
 		&ExpectFlow{"priority=200,ip", fmt.Sprintf("ct(table=%d,zone=65520)", table.GetNext())},
 		&ExpectFlow{"priority=210,ct_state=-new+trk,ct_mark=0x2/0x2,ip,reg0=0x1/0xffff", gotoTableAction},
 		&ExpectFlow{"priority=200,ct_state=+new+trk,ip,reg0=0x1/0xffff", fmt.Sprintf("ct(commit,table=%d,zone=65520,exec(load:0x1->NXM_NX_CT_MARK[1])", table.GetNext())},

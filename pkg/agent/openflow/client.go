@@ -456,7 +456,7 @@ func (c *client) InstallNodeFlows(hostname string,
 			flows = append(flows, c.featurePodConnectivity.l3FwdFlowToRemoteViaRouting(cookie.Node, localGatewayMAC, remoteGatewayMAC, tunnelPeerIP, peerPodCIDR)...)
 		}
 		if c.enableEgress {
-			flows = append(flows, c.snatSkipNodeFlow(tunnelPeerIP, cookie.Node))
+			flows = append(flows, c.featureEgress.snatSkipNodeFlow(cookie.Node, tunnelPeerIP))
 		}
 		if c.connectUplinkToBridge {
 			// flow to catch traffic from AntreaFlexibleIPAM Pod to remote Per-Node IPAM Pod
@@ -882,59 +882,44 @@ func (c *client) initializeFeatures() map[pipeline][]*featureTemplate {
 }
 
 func (c *client) InstallExternalFlows(exceptCIDRs []net.IPNet) error {
-	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
-
-	var flows []binding.Flow
-	var ipv4CIDRs []net.IPNet
-	var ipv6CIDRs []net.IPNet
-	for _, cidr := range exceptCIDRs {
-		if cidr.IP.To4() == nil {
-			ipv6CIDRs = append(ipv6CIDRs, cidr)
-		} else {
-			ipv4CIDRs = append(ipv4CIDRs, cidr)
+	if c.enableEgress {
+		flows := c.featureEgress.externalFlows(cookie.SNAT, exceptCIDRs)
+		if err := c.ofEntryOperations.AddAll(flows); err != nil {
+			return fmt.Errorf("failed to install flows for external communication: %v", err)
 		}
+		c.featureEgress.hostNetworkingFlows = append(c.featureEgress.hostNetworkingFlows, flows...)
 	}
-	if c.nodeConfig.NodeIPv4Addr != nil && c.nodeConfig.PodIPv4CIDR != nil {
-		flows = c.externalFlows(c.nodeConfig.NodeIPv4Addr.IP, *c.nodeConfig.PodIPv4CIDR, localGatewayMAC, ipv4CIDRs)
-	}
-	if c.nodeConfig.NodeIPv6Addr != nil && c.nodeConfig.PodIPv6CIDR != nil {
-		flows = append(flows, c.externalFlows(c.nodeConfig.NodeIPv6Addr.IP, *c.nodeConfig.PodIPv6CIDR, localGatewayMAC, ipv6CIDRs)...)
-	}
-	if err := c.ofEntryOperations.AddAll(flows); err != nil {
-		return fmt.Errorf("failed to install flows for external communication: %v", err)
-	}
-	c.hostNetworkingFlows = append(c.hostNetworkingFlows, flows...)
 	return nil
 }
 
 func (c *client) InstallSNATMarkFlows(snatIP net.IP, mark uint32) error {
-	flows := c.snatMarkFlows(snatIP, mark)
+	flow := c.featureEgress.snatIPFromTunnelFlow(cookie.SNAT, snatIP, mark)
 	cacheKey := fmt.Sprintf("s%x", mark)
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	return c.addFlows(c.snatFlowCache, cacheKey, flows)
+	return c.addFlows(c.featureEgress.snatFlowCache, cacheKey, []binding.Flow{flow})
 }
 
 func (c *client) UninstallSNATMarkFlows(mark uint32) error {
 	cacheKey := fmt.Sprintf("s%x", mark)
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	return c.deleteFlows(c.snatFlowCache, cacheKey)
+	return c.deleteFlows(c.featureEgress.snatFlowCache, cacheKey)
 }
 
 func (c *client) InstallPodSNATFlows(ofPort uint32, snatIP net.IP, snatMark uint32) error {
-	flows := []binding.Flow{c.snatRuleFlow(ofPort, snatIP, snatMark, c.nodeConfig.GatewayConfig.MAC)}
+	flows := []binding.Flow{c.featureEgress.snatRuleFlow(cookie.SNAT, ofPort, snatIP, snatMark, c.nodeConfig.GatewayConfig.MAC)}
 	cacheKey := fmt.Sprintf("p%x", ofPort)
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	return c.addFlows(c.snatFlowCache, cacheKey, flows)
+	return c.addFlows(c.featureEgress.snatFlowCache, cacheKey, flows)
 }
 
 func (c *client) UninstallPodSNATFlows(ofPort uint32) error {
 	cacheKey := fmt.Sprintf("p%x", ofPort)
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	return c.deleteFlows(c.snatFlowCache, cacheKey)
+	return c.deleteFlows(c.featureEgress.snatFlowCache, cacheKey)
 }
 
 func (c *client) ReplayFlows() {
@@ -959,8 +944,8 @@ func (c *client) ReplayFlows() {
 	addFixedFlows(c.featurePodConnectivity.hostNetworkingFlows)
 	addFixedFlows(c.defaultServiceFlows)
 	// hostNetworkingFlows is used only on Windows. Replay the flows only when there are flows in this cache.
-	if len(c.hostNetworkingFlows) > 0 {
-		addFixedFlows(c.hostNetworkingFlows)
+	if c.featureEgress != nil && len(c.featureEgress.hostNetworkingFlows) > 0 {
+		addFixedFlows(c.featureEgress.hostNetworkingFlows)
 	}
 
 	installCachedFlows := func(key, value interface{}) bool {

@@ -27,11 +27,6 @@ import (
 	binding "antrea.io/antrea/pkg/ovs/openflow"
 )
 
-// TODO: refactor
-func (c *client) snatMarkFlows(snatIP net.IP, mark uint32) []binding.Flow {
-	return []binding.Flow{c.snatIPFromTunnelFlow(snatIP, mark)}
-}
-
 // Feature: PodConnectivity
 // Stage: ClassifierStage
 // Tables: ClassifierTable

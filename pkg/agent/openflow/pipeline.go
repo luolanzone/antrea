@@ -2517,127 +2517,85 @@ func (c *featureNetworkPolicy) ingressClassifierFlows(category cookie.Category) 
 	}
 }
 
-// snatSkipNodeFlow installs a flow to skip SNAT for traffic to the transport IP of the a remote Node.
-func (c *client) snatSkipNodeFlow(nodeIP net.IP, category cookie.Category) binding.Flow {
-	ipProto := getIPProtocol(nodeIP)
-	// This flow is for the traffic to the remote Node IP.
-	return L3ForwardingTable.BuildFlow(priorityNormal).
-		MatchProtocol(ipProto).
+// Feature: Egress
+// Stage: RoutingStage
+// Tables: L3ForwardingTable
+// Refactored from:
+//   - func (c *client) snatRuleFlow(ofPort uint32, snatIP net.IP, snatMark uint32, localGatewayMAC net.HardwareAddr) binding.Flow
+// snatSkipNodeFlow generates the flow to skip SNAT for connections destined for the transport IP of a remote Node.
+func (c *featureEgress) snatSkipNodeFlow(category cookie.Category, nodeIP net.IP) binding.Flow {
+	ipProtocol := getIPProtocol(nodeIP)
+	// This generates the flow to match the packets to the remote Node IP.
+	return L3ForwardingTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(c.cookieAllocator.Request(category).Raw()).
+		MatchProtocol(ipProtocol).
+		MatchRegMark(NotRewriteMACRegMark). // Excluding Service traffic.
 		MatchRegMark(FromLocalRegMark).
 		MatchDstIP(nodeIP).
-		Action().GotoTable(L3ForwardingTable.GetNext()).
+		Action().LoadRegMark(ToExternalRegMark).
+		Action().GotoStage(binding.SwitchingStage).
+		Done()
+}
+
+// Feature: Egress
+// Stage: PostRoutingStage
+// Tables: SNATTable
+// Refactored from:
+//   - func (c *client) snatIPFromTunnelFlow(snatIP net.IP, mark uint32) binding.Flow
+// snatIPFromTunnelFlow generates the flow that marks SNAT packets tunnelled from remote Nodes. The SNAT IP matches the
+// packet's tunnel destination IP.
+func (c *featureEgress) snatIPFromTunnelFlow(category cookie.Category, snatIP net.IP, mark uint32) binding.Flow {
+	ipProtocol := getIPProtocol(snatIP)
+	return SNATTable.ofTable.BuildFlow(priorityNormal).
 		Cookie(c.cookieAllocator.Request(category).Raw()).
-		Done()
-}
-
-// snatCommonFlows installs the default flows for performing SNAT for traffic to
-// the external network. The flows identify the packets to external, and send
-// them to SNATTable, where SNAT IPs are looked up for the packets.
-func (c *client) snatCommonFlows(nodeIP net.IP, localSubnet net.IPNet, localGatewayMAC net.HardwareAddr, exceptCIDRs []net.IPNet, category cookie.Category) []binding.Flow {
-	nextTable := L3ForwardingTable.GetNext()
-	ipProto := getIPProtocol(localSubnet.IP)
-	flows := []binding.Flow{
-		// First install flows for traffic that should bypass SNAT.
-		// This flow is for traffic to the local Pod subnet that don't need MAC rewriting (L2 forwarding case). Other
-		// traffic to the local Pod subnet will be handled by L3 forwarding rules.
-		L3ForwardingTable.BuildFlow(priorityNormal).
-			MatchProtocol(ipProto).
-			MatchRegFieldWithValue(RewriteMACRegMark.GetField(), 0).
-			MatchDstIPNet(localSubnet).
-			Action().GotoTable(nextTable).
-			Cookie(c.cookieAllocator.Request(category).Raw()).
-			Done(),
-		// This flow is for the traffic to the local Node IP.
-		L3ForwardingTable.BuildFlow(priorityNormal).
-			MatchProtocol(ipProto).
-			MatchRegMark(FromLocalRegMark).
-			MatchDstIP(nodeIP).
-			Action().GotoTable(nextTable).
-			Cookie(c.cookieAllocator.Request(category).Raw()).
-			Done(),
-		// The return traffic of connections to a local Pod through the gateway interface (so FromGatewayCTMark is set)
-		// should bypass SNAT too. But it has been covered by the gatewayCT related flow generated in l3FwdFlowToGateway
-		// which forwards all reply traffic for such connections back to the gateway interface with the high priority.
-
-		// Send the traffic to external to SNATTable.
-		L3ForwardingTable.BuildFlow(priorityLow).
-			MatchProtocol(ipProto).
-			MatchRegMark(FromLocalRegMark).
-			Action().GotoTable(SNATTable.GetID()).
-			Cookie(c.cookieAllocator.Request(category).Raw()).
-			Done(),
-		// For the traffic tunneled from remote Nodes, rewrite the
-		// destination MAC to the gateway interface MAC.
-		L3ForwardingTable.BuildFlow(priorityLow).
-			MatchProtocol(ipProto).
-			MatchRegMark(FromTunnelRegMark).
-			Action().SetDstMAC(localGatewayMAC).
-			Action().GotoTable(SNATTable.GetID()).
-			Cookie(c.cookieAllocator.Request(category).Raw()).
-			Done(),
-
-		// Drop the traffic from remote Nodes if no matched SNAT policy.
-		SNATTable.BuildFlow(priorityLow).
-			MatchProtocol(ipProto).
-			MatchCTStateNew(true).MatchCTStateTrk(true).
-			MatchRegMark(FromTunnelRegMark).
-			Action().Drop().
-			Cookie(c.cookieAllocator.Request(category).Raw()).
-			Done(),
-	}
-	for _, cidr := range exceptCIDRs {
-		flows = append(flows, L3ForwardingTable.BuildFlow(priorityNormal).
-			MatchProtocol(ipProto).
-			MatchRegMark(FromLocalRegMark).
-			MatchDstIPNet(cidr).
-			Action().GotoTable(nextTable).
-			Cookie(c.cookieAllocator.Request(category).Raw()).
-			Done())
-	}
-	return flows
-}
-
-// snatIPFromTunnelFlow generates a flow that marks SNAT packets tunnelled from
-// remote Nodes. The SNAT IP matches the packet's tunnel destination IP.
-func (c *client) snatIPFromTunnelFlow(snatIP net.IP, mark uint32) binding.Flow {
-	ipProto := getIPProtocol(snatIP)
-	return SNATTable.BuildFlow(priorityNormal).
-		MatchProtocol(ipProto).
-		MatchCTStateNew(true).MatchCTStateTrk(true).
+		MatchProtocol(ipProtocol).
+		MatchRegMark(EgressRegMark).
+		MatchCTStateNew(true).
+		MatchCTStateTrk(true).
 		MatchTunnelDst(snatIP).
+		Action().SetDstMAC(c.gatewayMAC).
 		Action().LoadPktMarkRange(mark, snatPktMarkRange).
-		Action().GotoTable(L3DecTTLTable.GetID()).
-		Cookie(c.cookieAllocator.Request(cookie.SNAT).Raw()).
+		Action().GotoStage(binding.SwitchingStage).
 		Done()
 }
 
-// snatRuleFlow generates a flow that applies the SNAT rule for a local Pod. If
-// the SNAT IP exists on the local Node, it sets the packet mark with the ID of
-// the SNAT IP, for the traffic from the ofPort to external; if the SNAT IP is
-// on a remote Node, it tunnels the packets to the SNAT IP.
-func (c *client) snatRuleFlow(ofPort uint32, snatIP net.IP, snatMark uint32, localGatewayMAC net.HardwareAddr) binding.Flow {
-	ipProto := getIPProtocol(snatIP)
+// Feature: Egress
+// Stage: PostRoutingStage
+// Tables: SNATTable
+// Refactored from:
+//   - func (c *client) snatRuleFlow(ofPort uint32, snatIP net.IP, snatMark uint32, localGatewayMAC net.HardwareAddr) binding.Flow
+// snatRuleFlow generates the flow that applies the SNAT rule for a local Pod. If the SNAT IP exists on the local Node,
+// it sets the packet mark with the ID of the SNAT IP, for the traffic from local Pod to external; if the SNAT IP is
+// on a remote Node, it tunnels the packets to the remote Node.
+func (c *featureEgress) snatRuleFlow(category cookie.Category,
+	ofPort uint32,
+	snatIP net.IP,
+	snatMark uint32,
+	localGatewayMAC net.HardwareAddr) binding.Flow {
+	ipProtocol := getIPProtocol(snatIP)
 	if snatMark != 0 {
 		// Local SNAT IP.
-		return SNATTable.BuildFlow(priorityNormal).
-			MatchProtocol(ipProto).
-			MatchCTStateNew(true).MatchCTStateTrk(true).
+		return SNATTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
+			MatchRegMark(EgressRegMark).
+			MatchCTStateNew(true).
+			MatchCTStateTrk(true).
 			MatchInPort(ofPort).
 			Action().LoadPktMarkRange(snatMark, snatPktMarkRange).
-			Action().GotoTable(SNATTable.GetNext()).
-			Cookie(c.cookieAllocator.Request(cookie.SNAT).Raw()).
+			Action().GotoStage(binding.SwitchingStage).
 			Done()
 	}
 	// SNAT IP should be on a remote Node.
-	return SNATTable.BuildFlow(priorityNormal).
-		MatchProtocol(ipProto).
+	return SNATTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(c.cookieAllocator.Request(category).Raw()).
+		MatchProtocol(ipProtocol).
+		MatchRegMark(EgressRegMark).
 		MatchInPort(ofPort).
 		Action().SetSrcMAC(localGatewayMAC).
 		Action().SetDstMAC(GlobalVirtualMAC).
-		// Set tunnel destination to the SNAT IP.
-		Action().SetTunnelDst(snatIP).
-		Action().GotoTable(L3DecTTLTable.GetID()).
-		Cookie(c.cookieAllocator.Request(cookie.SNAT).Raw()).
+		Action().SetTunnelDst(snatIP). // Set tunnel destination to the SNAT IP.
+		Action().GotoStage(binding.SwitchingStage).
 		Done()
 }
 
@@ -2931,12 +2889,79 @@ func (c *featurePodConnectivity) decTTLFlows(category cookie.Category) []binding
 	return flows
 }
 
-// externalFlows returns the flows needed to enable SNAT for external traffic.
-func (c *client) externalFlows(nodeIP net.IP, localSubnet net.IPNet, localGatewayMAC net.HardwareAddr, exceptCIDRs []net.IPNet) []binding.Flow {
-	if !c.enableEgress {
-		return nil
+// Feature: Egress
+// Stage: RoutingStage
+// Tables: L3ForwardingTable
+// Stage: PostRoutingStage
+// Tables: SNATTable
+// Refactored from:
+//   - func (c *client) externalFlows(nodeIP net.IP, localSubnet net.IPNet, localGatewayMAC net.HardwareAddr, exceptCIDRs []net.IPNet) []binding.Flow
+// externalFlows generates the flows to perform SNAT for the packets of connections to the external network. The flows identify
+// the packets to external network, and send them to SNATTable, where SNAT IPs are looked up for the packets.
+func (c *featureEgress) externalFlows(category cookie.Category, exceptCIDRs []net.IPNet) []binding.Flow {
+	exceptCIDRsMap := make(map[binding.Protocol][]net.IPNet)
+	for _, cidr := range exceptCIDRs {
+		if cidr.IP.To4() == nil {
+			exceptCIDRsMap[binding.ProtocolIPv6] = append(exceptCIDRsMap[binding.ProtocolIPv6], cidr)
+		} else {
+			exceptCIDRsMap[binding.ProtocolIP] = append(exceptCIDRsMap[binding.ProtocolIP], cidr)
+		}
 	}
-	return c.snatCommonFlows(nodeIP, localSubnet, localGatewayMAC, exceptCIDRs, cookie.SNAT)
+
+	flows := []binding.Flow{
+		// This generates the flow to match the packets to external network and forward them to SNATTable. The packets
+		// from local Pods or remote Pods will hit the flow.
+		// For simplicity, in the following:
+		//   - per-Node IPAM Pod is referred to as Pod.
+		//   - Remote Nodes' IPs are excluded by other flows.
+		//   - Egress is enabled.
+		// All traffic models are:
+		//   01. Pod                         -- Egress [request]            --> External
+		//   02. Remote Pod(via Tunnel)      -- Egress [request]            --> External
+		L3ForwardingTable.ofTable.BuildFlow(priorityMiss).
+			Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
+			Action().LoadRegMark(ToExternalRegMark).
+			Action().LoadRegMark(EgressRegMark).
+			Action().GotoStage(binding.PostRoutingStage).
+			Done(),
+	}
+
+	for _, ipProtocol := range c.ipProtocols {
+		flows = append(flows,
+			// This generates the flow to match the tracked Egress connections to Switching Stage directly.
+			SNATTable.ofTable.BuildFlow(priorityNormal).
+				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchRegMark(EgressRegMark).
+				MatchCTStateNew(false).
+				MatchCTStateTrk(true).
+				MatchRegMark(FromTunnelRegMark).
+				Action().SetDstMAC(c.gatewayMAC).
+				Action().GotoStage(binding.SwitchingStage).
+				Done(),
+			// This generates the default flow to drop the packets from remote Nodes and there is no matched SNAT policy.
+			SNATTable.ofTable.BuildFlow(priorityLow).
+				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchRegMark(EgressRegMark).
+				MatchCTStateNew(true).
+				MatchCTStateTrk(true).
+				MatchRegMark(FromTunnelRegMark).
+				Action().Drop().
+				Done())
+		// This generates the flows to bypass the connections destined for the except CIDRs.
+		for _, cidr := range exceptCIDRsMap[ipProtocol] {
+			flows = append(flows, L3ForwardingTable.ofTable.BuildFlow(priorityNormal).
+				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchRegMark(NotRewriteMACRegMark).
+				MatchRegMark(FromLocalRegMark).
+				MatchDstIPNet(cidr).
+				Action().GotoStage(binding.SwitchingStage).
+				Done())
+		}
+	}
+	return flows
 }
 
 // policyConjKeyFuncKeyFunc knows how to get key of a *policyRuleConjunction.

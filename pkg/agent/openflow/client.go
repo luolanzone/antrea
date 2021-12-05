@@ -460,7 +460,7 @@ func (c *client) InstallNodeFlows(hostname string,
 		}
 		if c.connectUplinkToBridge {
 			// flow to catch traffic from AntreaFlexibleIPAM Pod to remote Per-Node IPAM Pod
-			flows = append(flows, c.featurePodConnectivity.l3FwdFlowToRemoteViaGW(cookie.Node, remoteGatewayMAC, *peerPodCIDR, true))
+			flows = append(flows, c.featurePodConnectivity.l3FwdFlowToRemoteViaUplink(cookie.Node, remoteGatewayMAC, *peerPodCIDR, true)...)
 		}
 	}
 	if ipsecTunOFPort != 0 {
@@ -552,11 +552,11 @@ func (c *client) InstallServiceGroup(groupID binding.GroupIDType, withSessionAff
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
-	group := c.serviceEndpointGroup(groupID, withSessionAffinity, endpoints...)
+	group := c.featureService.serviceEndpointGroup(groupID, withSessionAffinity, endpoints...)
 	if err := group.Add(); err != nil {
 		return fmt.Errorf("error when installing Service Endpoints Group: %w", err)
 	}
-	c.groupCache.Store(groupID, group)
+	c.featureService.groupCache.Store(groupID, group)
 	return nil
 }
 
@@ -566,7 +566,7 @@ func (c *client) UninstallServiceGroup(groupID binding.GroupIDType) error {
 	if !c.bridge.DeleteGroup(groupID) {
 		return fmt.Errorf("group %d delete failed", groupID)
 	}
-	c.groupCache.Delete(groupID)
+	c.featureService.groupCache.Delete(groupID)
 	return nil
 }
 
@@ -590,14 +590,14 @@ func (c *client) InstallEndpointFlows(protocol binding.Protocol, endpoints []pro
 		endpointIP := net.ParseIP(endpoint.IP())
 		portVal := portToUint16(endpointPort)
 		cacheKey := generateEndpointFlowCacheKey(endpoint.IP(), endpointPort, protocol)
-		flows = append(flows, c.endpointDNATFlow(endpointIP, portVal, protocol))
+		flows = append(flows, c.featureService.endpointDNATFlow(cookie.Service, endpointIP, portVal, protocol))
 		if endpoint.GetIsLocal() {
-			flows = append(flows, c.hairpinSNATFlow(endpointIP))
+			flows = append(flows, c.featureService.podHairpinFlow(cookie.Service, endpointIP))
 		}
 		keyToFlows[cacheKey] = flows
 	}
 
-	return c.addFlowsWithMultipleKeys(c.serviceFlowCache, keyToFlows)
+	return c.addFlowsWithMultipleKeys(c.featureService.serviceFlowCache, keyToFlows)
 }
 
 func (c *client) UninstallEndpointFlows(protocol binding.Protocol, endpoint proxy.Endpoint) error {
@@ -609,83 +609,70 @@ func (c *client) UninstallEndpointFlows(protocol binding.Protocol, endpoint prox
 		return fmt.Errorf("error when getting port: %w", err)
 	}
 	cacheKey := generateEndpointFlowCacheKey(endpoint.IP(), port, protocol)
-	return c.deleteFlows(c.serviceFlowCache, cacheKey)
+	return c.deleteFlows(c.featureService.serviceFlowCache, cacheKey)
 }
 
 func (c *client) InstallServiceFlows(groupID binding.GroupIDType, svcIP net.IP, svcPort uint16, protocol binding.Protocol, affinityTimeout uint16, nodeLocalExternal bool, svcType v1.ServiceType) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 	var flows []binding.Flow
-	flows = append(flows, c.serviceLBFlow(groupID, svcIP, svcPort, protocol, affinityTimeout != 0, nodeLocalExternal, svcType))
+	flows = append(flows, c.featureService.serviceLBFlow(cookie.Service, groupID, svcIP, svcPort, protocol, affinityTimeout != 0, nodeLocalExternal, svcType))
 	if affinityTimeout != 0 {
-		flows = append(flows, c.serviceLearnFlow(groupID, svcIP, svcPort, protocol, affinityTimeout, nodeLocalExternal, svcType))
+		flows = append(flows, c.featureService.serviceLearnFlow(cookie.Service, groupID, svcIP, svcPort, protocol, affinityTimeout, nodeLocalExternal, svcType))
 	}
 	cacheKey := generateServicePortFlowCacheKey(svcIP, svcPort, protocol)
-	return c.addFlows(c.serviceFlowCache, cacheKey, flows)
+	return c.addFlows(c.featureService.serviceFlowCache, cacheKey, flows)
 }
 
 func (c *client) UninstallServiceFlows(svcIP net.IP, svcPort uint16, protocol binding.Protocol) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 	cacheKey := generateServicePortFlowCacheKey(svcIP, svcPort, protocol)
-	return c.deleteFlows(c.serviceFlowCache, cacheKey)
+	return c.deleteFlows(c.featureService.serviceFlowCache, cacheKey)
 }
 
 func (c *client) GetServiceFlowKeys(svcIP net.IP, svcPort uint16, protocol binding.Protocol, endpoints []proxy.Endpoint) []string {
 	cacheKey := generateServicePortFlowCacheKey(svcIP, svcPort, protocol)
-	flowKeys := c.getFlowKeysFromCache(c.serviceFlowCache, cacheKey)
+	flowKeys := c.getFlowKeysFromCache(c.featureService.serviceFlowCache, cacheKey)
 	for _, ep := range endpoints {
 		epPort, _ := ep.Port()
 		cacheKey = generateEndpointFlowCacheKey(ep.IP(), epPort, protocol)
-		flowKeys = append(flowKeys, c.getFlowKeysFromCache(c.serviceFlowCache, cacheKey)...)
+		flowKeys = append(flowKeys, c.getFlowKeysFromCache(c.featureService.serviceFlowCache, cacheKey)...)
 	}
 	return flowKeys
 }
 
 func (c *client) InstallDefaultServiceFlows(nodePortAddressesIPv4, nodePortAddressesIPv6 []net.IP) error {
 	flows := []binding.Flow{
-		c.serviceNeedLBFlow(),
-		c.sessionAffinityReselectFlow(),
-		c.l2ForwardOutputServiceHairpinFlow(),
+		c.featureService.serviceNeedLBFlow(cookie.Service),
+		c.featureService.sessionAffinityReselectFlow(cookie.Service),
+		c.featureService.l2ForwardOutputHairpinServiceFlow(cookie.Service),
 	}
-	if c.networkConfig.IPv4Enabled {
-		flows = append(flows, c.serviceHairpinResponseDNATFlow(binding.ProtocolIP))
-		flows = append(flows, c.serviceLBBypassFlows(binding.ProtocolIP)...)
-		flows = append(flows, c.l3FwdServiceDefaultFlowsViaGW(binding.ProtocolIP, cookie.Service)...)
-		if c.proxyAll {
-			// The output interface of a packet is the same as where it is from, and the action of the packet should be
-			// IN_PORT, rather than output. When a packet of Service is from Antrea gateway and its Endpoint is on host
-			// network, it needs hairpin mark (by setting a register, it will be matched at table L2ForwardingOutTable).
-			flows = append(flows, c.serviceHairpinRegSetFlows(binding.ProtocolIP))
+
+	if c.proxyAll {
+		for _, ipProtocol := range c.ipProtocols {
 			// These flows are used to match the first packet of NodePort. The flows will set a bit of a register to mark
 			// the Service type of the packet as NodePort. The mark will be consumed in table serviceLBTable to match NodePort
-			flows = append(flows, c.serviceClassifierFlows(nodePortAddressesIPv4, binding.ProtocolIP)...)
-		}
-	}
-	if c.networkConfig.IPv6Enabled {
-		flows = append(flows, c.serviceHairpinResponseDNATFlow(binding.ProtocolIPv6))
-		flows = append(flows, c.serviceLBBypassFlows(binding.ProtocolIPv6)...)
-		flows = append(flows, c.l3FwdServiceDefaultFlowsViaGW(binding.ProtocolIPv6, cookie.Service)...)
-		if c.proxyAll {
-			// As IPv4 above.
-			flows = append(flows, c.serviceHairpinRegSetFlows(binding.ProtocolIPv6))
-			// As IPv4 above.
-			flows = append(flows, c.serviceClassifierFlows(nodePortAddressesIPv6, binding.ProtocolIPv6)...)
+			nodePortAddresses := nodePortAddressesIPv4
+			if ipProtocol == binding.ProtocolIPv6 {
+				nodePortAddresses = nodePortAddressesIPv6
+			}
+			flows = append(flows, c.featureService.nodePortProbeFlows(cookie.Service, nodePortAddresses, ipProtocol)...)
 		}
 	}
 	if err := c.ofEntryOperations.AddAll(flows); err != nil {
 		return err
 	}
-	c.defaultServiceFlows = flows
+	c.featureService.defaultServiceFlows = flows
 	return nil
 }
 
 func (c *client) InstallClusterServiceCIDRFlows(serviceNets []*net.IPNet) error {
-	flows := c.serviceCIDRDNATFlows(serviceNets)
+	flows := c.featureService.serviceCIDRDNATFlows(cookie.Service, serviceNets)
 	if err := c.ofEntryOperations.AddAll(flows); err != nil {
 		return err
 	}
-	c.defaultServiceFlows = flows
+	c.featureService.defaultServiceFlows = flows
 	return nil
 }
 
@@ -942,8 +929,7 @@ func (c *client) ReplayFlows() {
 	addFixedFlows(c.featurePodConnectivity.gatewayFlows)
 	addFixedFlows(c.featurePodConnectivity.defaultTunnelFlows)
 	addFixedFlows(c.featurePodConnectivity.hostNetworkingFlows)
-	addFixedFlows(c.defaultServiceFlows)
-	// hostNetworkingFlows is used only on Windows. Replay the flows only when there are flows in this cache.
+	addFixedFlows(c.featureService.defaultServiceFlows)
 	if c.featureEgress != nil && len(c.featureEgress.hostNetworkingFlows) > 0 {
 		addFixedFlows(c.featureEgress.hostNetworkingFlows)
 	}
@@ -963,7 +949,7 @@ func (c *client) ReplayFlows() {
 		return true
 	}
 
-	c.groupCache.Range(func(id, value interface{}) bool {
+	c.featureService.groupCache.Range(func(id, value interface{}) bool {
 		group := value.(binding.Group)
 		group.Reset()
 		if err := group.Add(); err != nil {
@@ -973,7 +959,7 @@ func (c *client) ReplayFlows() {
 	})
 	c.featurePodConnectivity.nodeFlowCache.Range(installCachedFlows)
 	c.featurePodConnectivity.podFlowCache.Range(installCachedFlows)
-	c.serviceFlowCache.Range(installCachedFlows)
+	c.featureService.serviceFlowCache.Range(installCachedFlows)
 
 	if err := c.ofEntryOperations.AddAll(c.featureNetworkPolicy.replayPolicyFlows()); err != nil {
 		klog.Errorf("Error when replaying flows: %v", err)
@@ -995,20 +981,6 @@ func (c *client) DeleteStaleFlows() error {
 		return nil
 	}
 	return c.deleteFlowsByRoundNum(*c.roundInfo.PrevRoundNum)
-}
-
-func (c *client) setupPolicyOnlyFlows() error {
-	// Rewrites MAC to gw port if the packet received is unmatched by local Pod flows.
-	flows := c.l3FwdFlowRouteToGW(c.nodeConfig.GatewayConfig.MAC, cookie.Default)
-	// If IPv6 is enabled, this flow will never get hit.
-	flows = append(flows,
-		// Replies any ARP request with the same global virtual MAC.
-		c.arpResponderStaticFlow(cookie.Default),
-	)
-	if err := c.ofEntryOperations.AddAll(flows); err != nil {
-		return fmt.Errorf("failed to setup policy-only flows: %w", err)
-	}
-	return nil
 }
 
 func (c *client) SubscribePacketIn(reason uint8, pktInQueue *binding.PacketInQueue) error {

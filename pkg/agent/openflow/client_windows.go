@@ -40,14 +40,14 @@ func (c *client) InstallLoadBalancerServiceFromOutsideFlows(svcIP net.IP, svcPor
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 	var flows []binding.Flow
-	flows = append(flows, c.loadBalancerServiceFromOutsideFlow(svcIP, svcPort, protocol))
+	flows = append(flows, c.featureService.loadBalancerServiceFromOutsideFlow(svcIP, svcPort, protocol))
 	cacheKey := fmt.Sprintf("L%s%s%x", svcIP, protocol, svcPort)
-	return c.addFlows(c.serviceFlowCache, cacheKey, flows)
+	return c.addFlows(c.featureService.serviceFlowCache, cacheKey, flows)
 }
 
 func (c *client) UninstallLoadBalancerServiceFromOutsideFlows(svcIP net.IP, svcPort uint16, protocol binding.Protocol) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 	cacheKey := fmt.Sprintf("L%s%s%x", svcIP, protocol, svcPort)
-	return c.deleteFlows(c.serviceFlowCache, cacheKey)
+	return c.deleteFlows(c.featureService.serviceFlowCache, cacheKey)
 }

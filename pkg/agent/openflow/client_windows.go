@@ -28,11 +28,11 @@ import (
 )
 
 func (c *client) InstallBridgeUplinkFlows() error {
-	flows := c.hostBridgeUplinkFlows(*c.nodeConfig.PodIPv4CIDR, cookie.Default)
+	flows := c.featurePodConnectivity.hostBridgeUplinkFlows(cookie.Default, *c.nodeConfig.PodIPv4CIDR)
 	if err := c.ofEntryOperations.AddAll(flows); err != nil {
 		return err
 	}
-	c.hostNetworkingFlows = flows
+	c.featurePodConnectivity.hostNetworkingFlows = flows
 	return nil
 }
 

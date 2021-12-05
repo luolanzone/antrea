@@ -102,11 +102,12 @@ func newTestReconciler(t *testing.T, controller *gomock.Controller, ifaceStore i
 	f, _ := newMockFQDNController(t, controller, nil)
 	ch := make(chan string, 100)
 	groupCounters := []proxytypes.GroupCounter{proxytypes.NewGroupCounter(false, ch)}
-	r := newReconciler(ofClient, ifaceStore, newIDAllocator(testAsyncDeleteInterval), f, groupCounters, v4Enabled, v6Enabled)
+	r := newReconciler(ofClient, ifaceStore, newIDAllocator(testAsyncDeleteInterval), f, groupCounters, v4Enabled, v6Enabled, true)
 	return r
 }
 
 func TestReconcilerForget(t *testing.T) {
+	prepareMockTables()
 	tests := []struct {
 		name              string
 		lastRealizeds     map[string]*lastRealized

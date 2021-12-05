@@ -745,33 +745,37 @@ func (c *client) connectionTrackFlows(category cookie.Category) []binding.Flow {
 	return flows
 }
 
-// dnsResponseBypassConntrackFlow generates a flow which is used to bypass the
-// dns response packetout from conntrack, to avoid unexpected packet drop.
-func (c *client) dnsResponseBypassConntrackFlow() binding.Flow {
-	table := ConntrackTable
-	if c.proxyAll {
-		table = ServiceConntrackTable
-	}
+// Feature: NetworkPolicy
+// Stage: ValidationStage
+// Tables: SNATConntrackTable / ConntrackTable
+// Refactored from:
+//   - func (c *client) dnsResponseBypassConntrackFlow() binding.Flow
+// dnsResponseBypassConntrackFlow generates the flow to bypass the dns response packetout from conntrack, to avoid unexpected
+// packet drop. This flow should be installed on the first table of ConntrackState Stage.
+func (c *featureNetworkPolicy) dnsResponseBypassConntrackFlow(table binding.Table) binding.Flow {
 	return table.BuildFlow(priorityHigh).
 		MatchRegFieldWithValue(CustomReasonField, CustomReasonDNS).
 		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
-		Action().ResubmitToTable(L2ForwardingCalcTable.GetID()).
+		Action().GotoStage(binding.SwitchingStage).
 		Done()
 }
 
-// dnsResponseBypassPacketInFlow generates a flow which is used to bypass the
-// dns packetIn conjunction flow for dns response packetOut. This packetOut
-// should be sent directly to the requesting client without being intercepted
-// again.
-func (c *client) dnsResponseBypassPacketInFlow() binding.Flow {
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage
+// Tables: AntreaPolicyIngressRuleTable
+// Refactored from:
+//   - func (c *client) dnsResponseBypassPacketInFlow() binding.Flow
+// dnsResponseBypassPacketInFlow generates the flow to bypass the dns packetIn conjunction flow for dns response packetOut.
+// This packetOut should be sent directly to the requesting client without being intercepted again.
+func (c *featureNetworkPolicy) dnsResponseBypassPacketInFlow() binding.Flow {
 	// TODO: use a unified register bit to mark packetOuts. The pipeline does not need to be
 	// aware of why the packetOut is being set by the controller, it just needs to be aware that
 	// this is a packetOut message and that some pipeline stages (conntrack, policy enforcement)
 	// should therefore be skipped.
-	return AntreaPolicyIngressRuleTable.BuildFlow(priorityDNSBypass).
-		MatchRegFieldWithValue(CustomReasonField, CustomReasonDNS).
+	return AntreaPolicyIngressRuleTable.ofTable.BuildFlow(priorityDNSBypass).
 		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
-		Action().ResubmitToTable(L2ForwardingOutTable.GetID()).
+		MatchRegFieldWithValue(CustomReasonField, CustomReasonDNS).
+		Action().GotoStage(binding.OutputStage).
 		Done()
 }
 
@@ -815,11 +819,16 @@ func (c *client) kubeProxyFlows(category cookie.Category) []binding.Flow {
 	return flows
 }
 
+// Feature: Traceflow
+// Stage: ConntrackStateStage
+// Tables: ConntrackStateTable
+// Stage: IngressSecurityStage
+// Tables: AntreaPolicyIngressRuleTable, IngressRuleTable
 // TODO: Use DuplicateToBuilder or integrate this function into original one to avoid unexpected
 // difference.
 // traceflowConnectionTrackFlows generates Traceflow specific flows in the
 // connectionTrackStateTable or L2ForwardingCalcTable.  When packet is not
-// provided, the flows bypass the drop flow in connectionTrackFlows to avoid
+// provided, the flows bypass the drop flow in conntrackStateFlow to avoid
 // unexpected drop of the injected Traceflow packet, and to drop any Traceflow
 // packet that has ct_state +rpl, which may happen when the Traceflow request
 // destination is the Node's IP.
@@ -829,38 +838,39 @@ func (c *client) kubeProxyFlows(category cookie.Category) []binding.Flow {
 // it also matches in_port to be the provided ofPort (the sender Pod); otherwise
 // when receiverOnly is true, the flow is added into L2ForwardingCalcTable and
 // matches the destination MAC (the receiver Pod MAC).
-func (c *client) traceflowConnectionTrackFlows(dataplaneTag uint8, receiverOnly bool, packet *binding.Packet, ofPort uint32, timeout uint16, category cookie.Category) []binding.Flow {
+func (c *featureTraceflow) traceflowConnectionTrackFlows(category cookie.Category, dataplaneTag uint8, receiverOnly bool, packet *binding.Packet, ofPort uint32, timeout uint16) []binding.Flow {
 	var flows []binding.Flow
 	if packet == nil {
 		for _, ipProtocol := range c.ipProtocols {
-			flowBuilder := ConntrackStateTable.BuildFlow(priorityLow + 1).
+			flowBuilder := ConntrackStateTable.ofTable.BuildFlow(priorityLow + 1).
+				Cookie(c.cookieAllocator.Request(category).Raw()).
 				MatchProtocol(ipProtocol).
 				MatchIPDSCP(dataplaneTag).
-				SetHardTimeout(timeout).
-				Cookie(c.cookieAllocator.Request(category).Raw())
+				SetHardTimeout(timeout)
+
 			if c.enableProxy {
 				flowBuilder = flowBuilder.
-					Action().ResubmitToTable(SessionAffinityTable.GetID()).
-					Action().ResubmitToTable(ServiceLBTable.GetID())
+					Action().ResubmitToTables(SessionAffinityTable.ofTable.GetID(), ServiceLBTable.ofTable.GetID())
 			} else {
 				flowBuilder = flowBuilder.
-					Action().ResubmitToTable(ConntrackStateTable.GetNext())
+					Action().ResubmitToTables(ConntrackStateTable.ofTable.GetNext())
 			}
 			flows = append(flows, flowBuilder.Done())
 
-			flows = append(flows, ConntrackStateTable.BuildFlow(priorityLow+2).
+			flows = append(flows, ConntrackStateTable.ofTable.BuildFlow(priorityLow+2).
+				Cookie(c.cookieAllocator.Request(category).Raw()).
 				MatchProtocol(ipProtocol).
 				MatchIPDSCP(dataplaneTag).
 				MatchCTStateTrk(true).MatchCTStateRpl(true).
 				SetHardTimeout(timeout).
-				Cookie(c.cookieAllocator.Request(category).Raw()).
 				Action().Drop().
 				Done())
 		}
 	} else {
 		var flowBuilder binding.FlowBuilder
 		if !receiverOnly {
-			flowBuilder = ConntrackStateTable.BuildFlow(priorityLow).
+			flowBuilder = ConntrackStateTable.ofTable.BuildFlow(priorityLow).
+				Cookie(c.cookieAllocator.Request(category).Raw()).
 				MatchInPort(ofPort).
 				Action().LoadIPDSCP(dataplaneTag)
 			if packet.DestinationIP != nil {
@@ -868,15 +878,20 @@ func (c *client) traceflowConnectionTrackFlows(dataplaneTag uint8, receiverOnly 
 			}
 			if c.enableProxy {
 				flowBuilder = flowBuilder.
-					Action().ResubmitToTable(SessionAffinityTable.GetID()).
-					Action().ResubmitToTable(ServiceLBTable.GetID())
+					Action().ResubmitToTables(SessionAffinityTable.ofTable.GetID(), ServiceLBTable.ofTable.GetID())
 			} else {
 				flowBuilder = flowBuilder.
-					Action().ResubmitToTable(ConntrackStateTable.GetNext())
+					Action().ResubmitToTables(ConntrackStateTable.ofTable.GetNext())
 			}
 		} else {
-			nextTable := c.ingressEntryTable
-			flowBuilder = L2ForwardingCalcTable.BuildFlow(priorityHigh).
+			var nextTable uint8
+			if c.enableAntreaPolicy {
+				nextTable = AntreaPolicyIngressRuleTable.GetID()
+			} else {
+				nextTable = IngressRuleTable.GetID()
+			}
+			flowBuilder = L2ForwardingCalcTable.ofTable.BuildFlow(priorityHigh).
+				Cookie(c.cookieAllocator.Request(category).Raw()).
 				MatchDstMAC(packet.DestinationMAC).
 				Action().LoadToRegField(TargetOFPortField, ofPort).
 				Action().LoadRegMark(OFPortFoundRegMark).
@@ -888,8 +903,7 @@ func (c *client) traceflowConnectionTrackFlows(dataplaneTag uint8, receiverOnly 
 		}
 
 		flowBuilder = flowBuilder.MatchCTStateNew(true).MatchCTStateTrk(true).
-			SetHardTimeout(timeout).
-			Cookie(c.cookieAllocator.Request(category).Raw())
+			SetHardTimeout(timeout)
 
 		// Match transport header
 		switch packet.IPProto {
@@ -911,7 +925,6 @@ func (c *client) traceflowConnectionTrackFlows(dataplaneTag uint8, receiverOnly 
 			}
 		default:
 			flowBuilder = flowBuilder.MatchIPProtocolValue(packet.IsIPv6, packet.IPProto)
-
 		}
 		if packet.IPProto == protocol.Type_TCP || packet.IPProto == protocol.Type_UDP {
 			if packet.DestinationPort != 0 {
@@ -926,12 +939,15 @@ func (c *client) traceflowConnectionTrackFlows(dataplaneTag uint8, receiverOnly 
 	return flows
 }
 
-func (c *client) traceflowNetworkPolicyFlows(dataplaneTag uint8, timeout uint16, category cookie.Category) []binding.Flow {
-	flows := []binding.Flow{}
-	c.conjMatchFlowLock.Lock()
-	defer c.conjMatchFlowLock.Unlock()
+// Feature: Traceflow
+// Refactored from:
+//   - func (c *client) traceflowNetworkPolicyFlows(dataplaneTag uint8, timeout uint16, category cookie.Category) []binding.Flow
+func (c *featureTraceflow) traceflowNetworkPolicyFlows(category cookie.Category, featureNetworkPolicy *featureNetworkPolicy, dataplaneTag uint8, timeout uint16) []binding.Flow {
+	var flows []binding.Flow
+	featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer featureNetworkPolicy.conjMatchFlowLock.Unlock()
 	// Copy default drop rules.
-	for _, ctx := range c.globalConjMatchFlowCache {
+	for _, ctx := range featureNetworkPolicy.globalConjMatchFlowCache {
 		if ctx.dropFlow != nil {
 			copyFlowBuilder := ctx.dropFlow.CopyToBuilder(priorityNormal+2, false)
 			if ctx.dropFlow.FlowProtocol() == "" {
@@ -941,8 +957,8 @@ func (c *client) traceflowNetworkPolicyFlows(dataplaneTag uint8, timeout uint16,
 					copyFlowBuilderIPv6 = copyFlowBuilderIPv6.Action().Meter(PacketInMeterIDTF)
 				}
 				flows = append(flows, copyFlowBuilderIPv6.MatchIPDSCP(dataplaneTag).
-					SetHardTimeout(timeout).
 					Cookie(c.cookieAllocator.Request(category).Raw()).
+					SetHardTimeout(timeout).
 					Action().SendToController(uint8(PacketInReasonTF)).
 					Done())
 				copyFlowBuilder = copyFlowBuilder.MatchProtocol(binding.ProtocolIP)
@@ -951,14 +967,14 @@ func (c *client) traceflowNetworkPolicyFlows(dataplaneTag uint8, timeout uint16,
 				copyFlowBuilder = copyFlowBuilder.Action().Meter(PacketInMeterIDTF)
 			}
 			flows = append(flows, copyFlowBuilder.MatchIPDSCP(dataplaneTag).
-				SetHardTimeout(timeout).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				SetHardTimeout(timeout).
 				Action().SendToController(uint8(PacketInReasonTF)).
 				Done())
 		}
 	}
 	// Copy Antrea NetworkPolicy drop rules.
-	for _, conj := range c.policyCache.List() {
+	for _, conj := range featureNetworkPolicy.policyCache.List() {
 		for _, flow := range conj.(*policyRuleConjunction).metricFlows {
 			if flow.IsDropFlow() {
 				copyFlowBuilder := flow.CopyToBuilder(priorityNormal+2, false)
@@ -1034,14 +1050,19 @@ func (c *client) l2ForwardCalcFlow(dstMAC net.HardwareAddr, ofPort uint32, skipI
 	// the default flow of L2ForwardingOutTable.
 }
 
-// traceflowL2ForwardOutputFlows generates Traceflow specific flows that outputs traceflow packets
-// to OVS port and Antrea Agent after L2forwarding calculation.
-func (c *client) traceflowL2ForwardOutputFlows(dataplaneTag uint8, liveTraffic, droppedOnly bool, timeout uint16, category cookie.Category) []binding.Flow {
-	flows := []binding.Flow{}
+// Feature: Traceflow
+// Stage: OutputStage
+// Tables: L2ForwardingOutTable
+// Refactored from:
+//   - func (c *client) traceflowL2ForwardOutputFlows(dataplaneTag uint8, liveTraffic, droppedOnly bool, timeout uint16, category cookie.Category) []binding.Flow
+// traceflowL2ForwardOutputFlows generates Traceflow specific flows that outputs traceflow packets to OVS port and Antrea
+// Agent after L2forwarding calculation.
+func (c *featureTraceflow) traceflowL2ForwardOutputFlows(category cookie.Category, dataplaneTag uint8, liveTraffic, droppedOnly bool, timeout uint16) []binding.Flow {
+	var flows []binding.Flow
 	for _, ipProtocol := range c.ipProtocols {
-		if c.networkConfig.TrafficEncapMode.SupportsEncap() {
+		if c.supportEncap {
 			// SendToController and Output if output port is tunnel port.
-			fb1 := L2ForwardingOutTable.BuildFlow(priorityNormal+3).
+			fb1 := L2ForwardingOutTable.ofTable.BuildFlow(priorityNormal+3).
 				MatchRegFieldWithValue(TargetOFPortField, config.DefaultTunOFPort).
 				MatchIPDSCP(dataplaneTag).
 				SetHardTimeout(timeout).
@@ -1053,7 +1074,7 @@ func (c *client) traceflowL2ForwardOutputFlows(dataplaneTag uint8, liveTraffic, 
 			// gateway. In encapMode, a Traceflow packet going out of the gateway
 			// port (i.e. exiting the overlay) essentially means that the Traceflow
 			// request is complete.
-			fb2 := L2ForwardingOutTable.BuildFlow(priorityNormal+2).
+			fb2 := L2ForwardingOutTable.ofTable.BuildFlow(priorityNormal+2).
 				MatchRegFieldWithValue(TargetOFPortField, config.HostGatewayOFPort).
 				MatchIPDSCP(dataplaneTag).
 				SetHardTimeout(timeout).
@@ -1080,7 +1101,7 @@ func (c *client) traceflowL2ForwardOutputFlows(dataplaneTag uint8, liveTraffic, 
 			// SendToController and Output if output port is local gateway. Unlike in
 			// encapMode, inter-Node Pod-to-Pod traffic is expected to go out of the
 			// gateway port on the way to its destination.
-			fb1 := L2ForwardingOutTable.BuildFlow(priorityNormal+2).
+			fb1 := L2ForwardingOutTable.ofTable.BuildFlow(priorityNormal+2).
 				MatchRegFieldWithValue(TargetOFPortField, config.HostGatewayOFPort).
 				MatchIPDSCP(dataplaneTag).
 				SetHardTimeout(timeout).
@@ -1097,12 +1118,9 @@ func (c *client) traceflowL2ForwardOutputFlows(dataplaneTag uint8, liveTraffic, 
 			flows = append(flows, fb1.Done())
 		}
 		// Only SendToController if output port is local gateway and destination IP is gateway.
-		gatewayIP := c.nodeConfig.GatewayConfig.IPv4
-		if ipProtocol == binding.ProtocolIPv6 {
-			gatewayIP = c.nodeConfig.GatewayConfig.IPv6
-		}
+		gatewayIP := c.gatewayIPs[ipProtocol]
 		if gatewayIP != nil {
-			fb := L2ForwardingOutTable.BuildFlow(priorityNormal+3).
+			fb := L2ForwardingOutTable.ofTable.BuildFlow(priorityNormal+3).
 				MatchRegFieldWithValue(TargetOFPortField, config.HostGatewayOFPort).
 				MatchDstIP(gatewayIP).
 				MatchIPDSCP(dataplaneTag).
@@ -1123,7 +1141,7 @@ func (c *client) traceflowL2ForwardOutputFlows(dataplaneTag uint8, liveTraffic, 
 			flows = append(flows, fb.Done())
 		}
 		// Only SendToController if output port is Pod port.
-		fb := L2ForwardingOutTable.BuildFlow(priorityNormal + 2).
+		fb := L2ForwardingOutTable.ofTable.BuildFlow(priorityNormal + 2).
 			MatchIPDSCP(dataplaneTag).
 			SetHardTimeout(timeout).
 			MatchProtocol(ipProtocol).
@@ -1142,8 +1160,8 @@ func (c *client) traceflowL2ForwardOutputFlows(dataplaneTag uint8, liveTraffic, 
 		flows = append(flows, fb.Done())
 		if c.enableProxy {
 			// Only SendToController for hairpin traffic.
-			// This flow must have higher priority than the one installed by l2ForwardOutputServiceHairpinFlow
-			fbHairpin := L2ForwardingOutTable.BuildFlow(priorityHigh + 2).
+			// This flow must have higher priority than the one installed by l2ForwardOutputHairpinServiceFlow
+			fbHairpin := L2ForwardingOutTable.ofTable.BuildFlow(priorityHigh + 2).
 				MatchIPDSCP(dataplaneTag).
 				SetHardTimeout(timeout).
 				MatchProtocol(ipProtocol).
@@ -1218,35 +1236,50 @@ func (c *client) l3FwdFlowToPod(localGatewayMAC net.HardwareAddr, podInterfaceIP
 	return flows
 }
 
-// l3FwdFlowRouteToPod generates the flows to route the traffic to a Pod based on
-// the destination IP. It rewrites the destination MAC of the packets to the Pod
-// interface MAC. The flow is used in the networkPolicyOnly mode for the traffic
-// from the gateway to a local Pod.
-func (c *client) l3FwdFlowRouteToPod(podInterfaceIPs []net.IP, podInterfaceMAC net.HardwareAddr, category cookie.Category) []binding.Flow {
+// Feature: NetworkPolicy
+// Stage: RoutingStage
+// Tables: L3ForwardingTable
+// Requirements: networkPolicyOnly mode
+// Refactored from:
+//   - func (c *client) l3FwdFlowRouteToPod(podInterfaceIPs []net.IP, podInterfaceMAC net.HardwareAddr, category cookie.Category) []binding.Flow
+// l3FwdFlowRouteToPod generates the flows to route the packets to a Pod based on the destination IP. It rewrites destination
+// MAC to the Pod interface's MAC. The flows are used in networkPolicyOnly mode to match the packets from the Antrea gateway.
+func (c *featureNetworkPolicy) l3FwdFlowRouteToPod(category cookie.Category,
+	podInterfaceIPs []net.IP,
+	podInterfaceMAC net.HardwareAddr) []binding.Flow {
 	var flows []binding.Flow
 	for _, ip := range podInterfaceIPs {
 		ipProtocol := getIPProtocol(ip)
-		flows = append(flows, L3ForwardingTable.BuildFlow(priorityNormal).MatchProtocol(ipProtocol).
+		flows = append(flows, L3ForwardingTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
 			MatchDstIP(ip).
 			Action().SetDstMAC(podInterfaceMAC).
-			Action().GotoTable(L3DecTTLTable.GetID()).
-			Cookie(c.cookieAllocator.Request(category).Raw()).
+			Action().LoadRegMark(ToLocalRegMark).
+			Action().NextTable().
 			Done())
 	}
 	return flows
 }
 
-// l3FwdFlowRouteToGW generates the flows to route the traffic to the gateway
-// interface. It rewrites the destination MAC of the packets to the gateway
-// interface MAC. The flow is used in the networkPolicyOnly mode for the traffic
-// from a local Pod to remote Pods, Nodes, or external network.
-func (c *client) l3FwdFlowRouteToGW(gwMAC net.HardwareAddr, category cookie.Category) []binding.Flow {
+// Feature: NetworkPolicy
+// Stage: RoutingStage
+// Tables: L3ForwardingTable
+// Requirements: networkPolicyOnly mode
+// Refactored from:
+//   - func (c *client) l3FwdFlowRouteToGW(gwMAC net.HardwareAddr, category cookie.Category) []binding.Flow
+// l3FwdFlowRouteToGW generates the flows to route the packets to the Antrea gateway. It rewrites destination MAC to the
+// Antrea gateway interface's MAC. The flows are used in networkPolicyOnly mode to match the packets sourced from a local Pod
+// and destined for remote Pods, Nodes, or external network.
+func (c *featureNetworkPolicy) l3FwdFlowRouteToGW(category cookie.Category) []binding.Flow {
 	var flows []binding.Flow
-	for _, ipProto := range c.ipProtocols {
-		flows = append(flows, L3ForwardingTable.BuildFlow(priorityLow).MatchProtocol(ipProto).
-			Action().SetDstMAC(gwMAC).
-			Action().GotoTable(L3ForwardingTable.GetNext()).
+	for _, ipProtocol := range c.ipProtocols {
+		flows = append(flows, L3ForwardingTable.ofTable.BuildFlow(priorityLow).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
+			Action().LoadRegMark(ToExternalRegMark).
+			Action().SetDstMAC(c.gatewayMAC).
+			Action().NextTable().
 			Done(),
 		)
 	}
@@ -1409,10 +1442,18 @@ func (c *client) arpResponderFlow(peerGatewayIP net.IP, category cookie.Category
 		Done()
 }
 
-// arpResponderStaticFlow generates ARP reply for any ARP request with the same global virtual MAC.
-// This flow is used in policy-only mode, where traffic are routed via IP not MAC.
-func (c *client) arpResponderStaticFlow(category cookie.Category) binding.Flow {
-	return arpResponderTable.BuildFlow(priorityNormal).MatchProtocol(binding.ProtocolARP).
+// Feature: NetworkPolicy
+// Stage: ClassifierStage
+// Tables: ARPResponderTable
+// Requirements: networkPolicyOnly mode.
+// Refactored from:
+//   - func (c *client) arpResponderStaticFlow(category cookie.Category) binding.Flow
+// arpResponderStaticFlow generates the flow to reply for any ARP request with the same global virtual MAC. It is used
+// in policy-only mode, where traffic are routed via IP not MAC.
+func (c *featureNetworkPolicy) arpResponderStaticFlow(category cookie.Category) binding.Flow {
+	return ARPResponderTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(c.cookieAllocator.Request(category).Raw()).
+		MatchProtocol(binding.ProtocolARP).
 		MatchARPOp(arpOpRequest).
 		Action().Move(binding.NxmFieldSrcMAC, binding.NxmFieldDstMAC).
 		Action().SetSrcMAC(GlobalVirtualMAC).
@@ -1423,9 +1464,7 @@ func (c *client) arpResponderStaticFlow(category cookie.Category) binding.Flow {
 		Action().Move(binding.NxmFieldARPSpa, binding.NxmFieldARPTpa).
 		Action().Move(SwapField.GetNXFieldName(), binding.NxmFieldARPSpa).
 		Action().OutputInPort().
-		Cookie(c.cookieAllocator.Request(category).Raw()).
 		Done()
-
 }
 
 // podIPSpoofGuardFlow generates the flow to check IP traffic sent out from local pod. Traffic from host gateway interface
@@ -1621,7 +1660,12 @@ func (c *client) arpNormalFlow(category cookie.Category) binding.Flow {
 		Done()
 }
 
-func (c *client) allowRulesMetricFlows(conjunctionID uint32, ingress bool) []binding.Flow {
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage / EgressSecurityStage
+// Tables: IngressMetricTable / EgressMetricTable.
+// Refactored from:
+//   - func (c *client) allowRulesMetricFlows(conjunctionID uint32, ingress bool) []binding.Flow
+func (c *featureNetworkPolicy) allowRulesMetricFlows(conjunctionID uint32, ingress bool) []binding.Flow {
 	metricTable := IngressMetricTable
 	offset := 0
 	// We use the 0..31 bits of the ct_label to store the ingress rule ID and use the 32..63 bits to store the
@@ -1633,12 +1677,12 @@ func (c *client) allowRulesMetricFlows(conjunctionID uint32, ingress bool) []bin
 		field = EgressRuleCTLabel
 	}
 	metricFlow := func(isCTNew bool, protocol binding.Protocol) binding.Flow {
-		return metricTable.BuildFlow(priorityNormal).
+		return metricTable.ofTable.BuildFlow(priorityNormal).
 			MatchProtocol(protocol).
+			Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
 			MatchCTStateNew(isCTNew).
 			MatchCTLabelField(0, uint64(conjunctionID)<<offset, field).
-			Action().GotoTable(metricTable.GetNext()).
-			Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
+			Action().NextTable().
 			Done()
 	}
 	var flows []binding.Flow
@@ -1646,22 +1690,27 @@ func (c *client) allowRulesMetricFlows(conjunctionID uint32, ingress bool) []bin
 	// The flow matching 'ct_state=+new' tracks the number of sessions and byte count of the first packet for each
 	// session.
 	// The flow matching 'ct_state=-new' tracks the byte/packet count of an established connection (both directions).
-	for _, proto := range c.ipProtocols {
-		flows = append(flows, metricFlow(true, proto), metricFlow(false, proto))
+	for _, ipProtocol := range c.ipProtocols {
+		flows = append(flows, metricFlow(true, ipProtocol), metricFlow(false, ipProtocol))
 	}
 	return flows
 }
 
-func (c *client) denyRuleMetricFlow(conjunctionID uint32, ingress bool) binding.Flow {
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage / EgressSecurityStage
+// Tables: IngressMetricTable / EgressMetricTable.
+// Refactored from:
+//   - func (c *client) denyRuleMetricFlow(conjunctionID uint32, ingress bool) binding.Flow
+func (c *featureNetworkPolicy) denyRuleMetricFlow(conjunctionID uint32, ingress bool) binding.Flow {
 	metricTable := IngressMetricTable
 	if !ingress {
 		metricTable = EgressMetricTable
 	}
-	return metricTable.BuildFlow(priorityNormal).
+	return metricTable.ofTable.BuildFlow(priorityNormal).
+		Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
 		MatchRegMark(CnpDenyRegMark).
 		MatchRegFieldWithValue(CNPDenyConjIDField, conjunctionID).
 		Action().Drop().
-		Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
 		Done()
 }
 
@@ -1706,7 +1755,7 @@ func (c *client) ipv6Flows(category cookie.Category) []binding.Flow {
 
 // conjunctionActionFlow generates the flow to jump to a specific table if policyRuleConjunction ID is matched. Priority of
 // conjunctionActionFlow is created at priorityLow for k8s network policies, and *priority assigned by PriorityAssigner for AntreaPolicy.
-func (c *client) conjunctionActionFlow(conjunctionID uint32, table binding.Table, nextTable uint8, priority *uint16, enableLogging bool) []binding.Flow {
+func (c *featureNetworkPolicy) conjunctionActionFlow(conjunctionID uint32, table binding.Table, nextTable uint8, priority *uint16, enableLogging bool) []binding.Flow {
 	var ofPriority uint16
 	if priority == nil {
 		ofPriority = priorityLow
@@ -1758,10 +1807,15 @@ func (c *client) conjunctionActionFlow(conjunctionID uint32, table binding.Table
 	return flows
 }
 
-// conjunctionActionDenyFlow generates the flow to mark the packet to be denied
-// (dropped or rejected) if policyRuleConjunction ID is matched.
-// Any matched flow will be dropped in corresponding metric tables.
-func (c *client) conjunctionActionDenyFlow(conjunctionID uint32, table binding.Table, priority *uint16, disposition uint32, enableLogging bool) binding.Flow {
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage / EgressSecurityStage
+// Tables: IngressMetricTable / EgressMetricTable.
+// Refactored from:
+//   - 'func (c *client) conjunctionActionDenyFlow(conjunctionID uint32, table binding.Table, priority *uint16,
+//     disposition uint32, enableLogging bool) binding.`
+// conjunctionActionDenyFlow generates the flow to mark the packet to be denied (dropped or rejected) if policyRuleConjunction
+// ID is matched. Any matched flow will be dropped in corresponding metric tables.
+func (c *featureNetworkPolicy) conjunctionActionDenyFlow(conjunctionID uint32, table binding.Table, priority *uint16, disposition uint32, enableLogging bool) binding.Flow {
 	ofPriority := *priority
 	metricTable := IngressMetricTable
 	tableID := table.GetID()
@@ -1799,12 +1853,12 @@ func (c *client) conjunctionActionDenyFlow(conjunctionID uint32, table binding.T
 	}
 
 	// We do not drop the packet immediately but send the packet to the metric table to update the rule metrics.
-	return flowBuilder.Action().GotoTable(metricTable.GetID()).
+	return flowBuilder.Action().ResubmitToTables(metricTable.GetID()).
 		Cookie(c.cookieAllocator.Request(cookie.Policy).Raw()).
 		Done()
 }
 
-func (c *client) conjunctionActionPassFlow(conjunctionID uint32, table binding.Table, priority *uint16, enableLogging bool) binding.Flow {
+func (c *featureNetworkPolicy) conjunctionActionPassFlow(conjunctionID uint32, table binding.Table, priority *uint16, enableLogging bool) binding.Flow {
 	ofPriority := *priority
 	conjReg := TFIngressConjIDField
 	nextTable := IngressRuleTable
@@ -1834,8 +1888,15 @@ func newFlowCategoryCache() *flowCategoryCache {
 	return &flowCategoryCache{}
 }
 
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage
+// Tables: IngressDefaultTable, AntreaPolicyIngressRuleTable
+// Stage: EgressSecurityStage
+// Tables: EgressDefaultTable, AntreaPolicyEgressRuleTable
+// Refactored from:
+//   - func (c *client) establishedConnectionFlows(category cookie.Category) (flows []binding.Flow)
 // establishedConnectionFlows generates flows to ensure established connections skip the NetworkPolicy rules.
-func (c *client) establishedConnectionFlows(category cookie.Category) (flows []binding.Flow) {
+func (c *featureNetworkPolicy) establishedConnectionFlows(category cookie.Category) []binding.Flow {
 	// egressDropTable checks the source address of packets, and drops packets sent from the AppliedToGroup but not
 	// matching the NetworkPolicy rules. Packets in the established connections need not to be checked with the
 	// egressRuleTable or the egressDropTable.
@@ -1845,51 +1906,64 @@ func (c *client) establishedConnectionFlows(category cookie.Category) (flows []b
 	// ingressRuleTable or ingressDropTable.
 	ingressDropTable := IngressDefaultTable
 	var allEstFlows []binding.Flow
-	for _, ipProto := range c.ipProtocols {
-		egressEstFlow := EgressRuleTable.BuildFlow(priorityHigh).MatchProtocol(ipProto).
-			MatchCTStateNew(false).MatchCTStateEst(true).
-			Action().GotoTable(egressDropTable.GetNext()).
+	for _, ipProtocol := range c.ipProtocols {
+		egressEstFlow := EgressRuleTable.ofTable.BuildFlow(priorityHigh).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
+			MatchCTStateNew(false).
+			MatchCTStateEst(true).
+			Action().ResubmitToTables(egressDropTable.ofTable.GetNext()).
 			Done()
-		ingressEstFlow := IngressRuleTable.BuildFlow(priorityHigh).MatchProtocol(ipProto).
-			MatchCTStateNew(false).MatchCTStateEst(true).
-			Action().GotoTable(ingressDropTable.GetNext()).
+		ingressEstFlow := IngressRuleTable.ofTable.BuildFlow(priorityHigh).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
+			MatchCTStateNew(false).
+			MatchCTStateEst(true).
+			Action().ResubmitToTables(ingressDropTable.ofTable.GetNext()).
 			Done()
 		allEstFlows = append(allEstFlows, egressEstFlow, ingressEstFlow)
 	}
 	if !c.enableAntreaPolicy {
 		return allEstFlows
 	}
-	apFlows := make([]binding.Flow, 0)
+	var apFlows []binding.Flow
 	for _, table := range GetAntreaPolicyEgressTables() {
-		for _, ipProto := range c.ipProtocols {
-			apEgressEstFlow := table.BuildFlow(priorityTopAntreaPolicy).MatchProtocol(ipProto).
-				MatchCTStateNew(false).MatchCTStateEst(true).
-				Action().GotoTable(egressDropTable.GetNext()).
+		for _, ipProtocol := range c.ipProtocols {
+			apEgressEstFlow := table.ofTable.BuildFlow(priorityTopAntreaPolicy).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchCTStateNew(false).
+				MatchCTStateEst(true).
+				Action().ResubmitToTables(egressDropTable.ofTable.GetNext()).
 				Done()
 			apFlows = append(apFlows, apEgressEstFlow)
 		}
-
 	}
 	for _, table := range GetAntreaPolicyIngressTables() {
-		for _, ipProto := range c.ipProtocols {
-			apIngressEstFlow := table.BuildFlow(priorityTopAntreaPolicy).MatchProtocol(ipProto).
-				MatchCTStateNew(false).MatchCTStateEst(true).
-				Action().GotoTable(ingressDropTable.GetNext()).
+		for _, ipProtocol := range c.ipProtocols {
+			apIngressEstFlow := table.ofTable.BuildFlow(priorityTopAntreaPolicy).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchCTStateNew(false).
+				MatchCTStateEst(true).
+				Action().ResubmitToTables(ingressDropTable.ofTable.GetNext()).
 				Done()
 			apFlows = append(apFlows, apIngressEstFlow)
 		}
-
 	}
 	allEstFlows = append(allEstFlows, apFlows...)
 	return allEstFlows
 }
 
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage
+// Tables: IngressDefaultTable, AntreaPolicyIngressRuleTable
+// Stage: EgressSecurityStage
+// Tables: EgressDefaultTable, AntreaPolicyEgressRuleTable
+// Refactored from:
+//   - func (c *client) relatedConnectionFlows(category cookie.Category) (flows []binding.Flow)
 // relatedConnectionFlows generates flows to ensure related connections skip the NetworkPolicy rules.
-func (c *client) relatedConnectionFlows(category cookie.Category) (flows []binding.Flow) {
+func (c *featureNetworkPolicy) relatedConnectionFlows(category cookie.Category) []binding.Flow {
 	// egressDropTable checks the source address of packets, and drops packets sent from the AppliedToGroup but not
 	// matching the NetworkPolicy rules. Packets in the related connections need not to be checked with the
 	// egressRuleTable or the egressDropTable.
@@ -1898,53 +1972,64 @@ func (c *client) relatedConnectionFlows(category cookie.Category) (flows []bindi
 	// matching the NetworkPolicy rules. Packets in the related connections need not to be checked with the
 	// ingressRuleTable or ingressDropTable.
 	ingressDropTable := IngressDefaultTable
-	var allRelFlows []binding.Flow
-	for _, ipProto := range c.ipProtocols {
-		egressRelFlow := EgressRuleTable.BuildFlow(priorityHigh).MatchProtocol(ipProto).
-			MatchCTStateNew(false).MatchCTStateRel(true).
-			Action().GotoTable(egressDropTable.GetNext()).
+	var flows []binding.Flow
+	for _, ipProtocol := range c.ipProtocols {
+		egressRelFlow := EgressRuleTable.ofTable.BuildFlow(priorityHigh).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
+			MatchCTStateNew(false).
+			MatchCTStateRel(true).
+			Action().ResubmitToTables(egressDropTable.GetNext()).
 			Done()
-		ingressRelFlow := IngressRuleTable.BuildFlow(priorityHigh).MatchProtocol(ipProto).
-			MatchCTStateNew(false).MatchCTStateRel(true).
-			Action().GotoTable(ingressDropTable.GetNext()).
+		ingressRelFlow := IngressRuleTable.ofTable.BuildFlow(priorityHigh).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
+			MatchCTStateNew(false).
+			MatchCTStateRel(true).
+			Action().ResubmitToTables(ingressDropTable.GetNext()).
 			Done()
-		allRelFlows = append(allRelFlows, egressRelFlow, ingressRelFlow)
+		flows = append(flows, egressRelFlow, ingressRelFlow)
 	}
 	if !c.enableAntreaPolicy {
-		return allRelFlows
+		return flows
 	}
-	apFlows := make([]binding.Flow, 0)
 	for _, table := range GetAntreaPolicyEgressTables() {
 		for _, ipProto := range c.ipProtocols {
-			apEgressRelFlow := table.BuildFlow(priorityTopAntreaPolicy).MatchProtocol(ipProto).
-				MatchCTStateNew(false).MatchCTStateRel(true).
-				Action().GotoTable(egressDropTable.GetNext()).
+			apEgressRelFlow := table.ofTable.BuildFlow(priorityTopAntreaPolicy).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProto).
+				MatchCTStateNew(false).
+				MatchCTStateRel(true).
+				Action().ResubmitToTables(egressDropTable.ofTable.GetNext()).
 				Done()
-			apFlows = append(apFlows, apEgressRelFlow)
+			flows = append(flows, apEgressRelFlow)
 		}
-
 	}
 	for _, table := range GetAntreaPolicyIngressTables() {
 		for _, ipProto := range c.ipProtocols {
-			apIngressRelFlow := table.BuildFlow(priorityTopAntreaPolicy).MatchProtocol(ipProto).
-				MatchCTStateNew(false).MatchCTStateRel(true).
-				Action().GotoTable(ingressDropTable.GetNext()).
+			apIngressRelFlow := table.ofTable.BuildFlow(priorityTopAntreaPolicy).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProto).
+				MatchCTStateNew(false).
+				MatchCTStateRel(true).
+				Action().ResubmitToTables(ingressDropTable.ofTable.GetNext()).
 				Done()
-			apFlows = append(apFlows, apIngressRelFlow)
+			flows = append(flows, apIngressRelFlow)
 		}
-
 	}
-	allRelFlows = append(allRelFlows, apFlows...)
-	return allRelFlows
+	return flows
 }
 
-// rejectBypassNetworkpolicyFlows generates flows to ensure reject responses generated
-// by the controller skip the NetworkPolicy rules.
-func (c *client) rejectBypassNetworkpolicyFlows(category cookie.Category) (flows []binding.Flow) {
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage
+// Tables: IngressDefaultTable, AntreaPolicyIngressRuleTable
+// Stage: EgressSecurityStage
+// Tables: EgressDefaultTable, AntreaPolicyEgressRuleTable
+// Refactored from:
+//   - func (c *client) rejectBypassNetworkpolicyFlows(category cookie.Category) (flows []binding.Flow)
+// rejectBypassNetworkpolicyFlows generates flows to ensure reject responses generated by the controller skip the
+// NetworkPolicy rules.
+func (c *featureNetworkPolicy) rejectBypassNetworkpolicyFlows(category cookie.Category) []binding.Flow {
 	// egressDropTable checks the source address of packets, and drops packets sent from the AppliedToGroup but not
 	// matching the NetworkPolicy rules. Generated reject responses need not to be checked with the
 	// egressRuleTable or the egressDropTable.
@@ -1953,51 +2038,51 @@ func (c *client) rejectBypassNetworkpolicyFlows(category cookie.Category) (flows
 	// matching the NetworkPolicy rules. Generated reject responses need not to be checked with the
 	// ingressRuleTable or ingressDropTable.
 	ingressDropTable := IngressDefaultTable
-	var allRejFlows []binding.Flow
-	for _, ipProto := range c.ipProtocols {
-		egressRejFlow := EgressRuleTable.BuildFlow(priorityHigh).MatchProtocol(ipProto).
-			MatchRegFieldWithValue(CustomReasonField, CustomReasonReject).
-			Action().GotoTable(egressDropTable.GetNext()).
+	var flows []binding.Flow
+	for _, ipProtocol := range c.ipProtocols {
+		egressRejFlow := EgressRuleTable.ofTable.BuildFlow(priorityHigh).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
-			Done()
-		ingressRejFlow := IngressRuleTable.BuildFlow(priorityHigh).MatchProtocol(ipProto).
+			MatchProtocol(ipProtocol).
 			MatchRegFieldWithValue(CustomReasonField, CustomReasonReject).
-			Action().GotoTable(ingressDropTable.GetNext()).
-			Cookie(c.cookieAllocator.Request(category).Raw()).
+			Action().ResubmitToTables(egressDropTable.GetNext()).
 			Done()
-		allRejFlows = append(allRejFlows, egressRejFlow, ingressRejFlow)
+		ingressRejFlow := IngressRuleTable.ofTable.BuildFlow(priorityHigh).
+			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchProtocol(ipProtocol).
+			MatchRegFieldWithValue(CustomReasonField, CustomReasonReject).
+			Action().ResubmitToTables(ingressDropTable.GetID()).
+			Done()
+		flows = append(flows, egressRejFlow, ingressRejFlow)
 	}
 	if !c.enableAntreaPolicy {
-		return allRejFlows
+		return flows
 	}
-	apFlows := make([]binding.Flow, 0)
 	for _, table := range GetAntreaPolicyEgressTables() {
-		for _, ipProto := range c.ipProtocols {
-			apEgressRejFlow := table.BuildFlow(priorityTopAntreaPolicy).MatchProtocol(ipProto).
-				MatchRegFieldWithValue(CustomReasonField, CustomReasonReject).
-				Action().GotoTable(egressDropTable.GetNext()).
+		for _, ipProtocol := range c.ipProtocols {
+			apEgressRejFlow := table.ofTable.BuildFlow(priorityTopAntreaPolicy).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchRegFieldWithValue(CustomReasonField, CustomReasonReject).
+				Action().ResubmitToTables(egressDropTable.ofTable.GetNext()).
 				Done()
-			apFlows = append(apFlows, apEgressRejFlow)
+			flows = append(flows, apEgressRejFlow)
 		}
-
 	}
 	for _, table := range GetAntreaPolicyIngressTables() {
-		for _, ipProto := range c.ipProtocols {
-			apIngressRejFlow := table.BuildFlow(priorityTopAntreaPolicy).MatchProtocol(ipProto).
-				MatchRegFieldWithValue(CustomReasonField, CustomReasonReject).
-				Action().GotoTable(ingressDropTable.GetNext()).
+		for _, ipProtocol := range c.ipProtocols {
+			apIngressRejFlow := table.ofTable.BuildFlow(priorityTopAntreaPolicy).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchRegFieldWithValue(CustomReasonField, CustomReasonReject).
+				Action().ResubmitToTables(ingressDropTable.ofTable.GetNext()).
 				Done()
-			apFlows = append(apFlows, apIngressRejFlow)
+			flows = append(flows, apIngressRejFlow)
 		}
-
 	}
-	allRejFlows = append(allRejFlows, apFlows...)
-	return allRejFlows
+	return flows
 }
 
-func (c *client) addFlowMatch(fb binding.FlowBuilder, matchKey *types.MatchKey, matchValue interface{}) binding.FlowBuilder {
+func (c *featureNetworkPolicy) addFlowMatch(fb binding.FlowBuilder, matchKey *types.MatchKey, matchValue interface{}) binding.FlowBuilder {
 	switch matchKey {
 	case MatchDstOFPort:
 		// ofport number in NXM_NX_REG1 is used in ingress rule to match packets sent to local Pod.
@@ -2056,7 +2141,7 @@ func (c *client) addFlowMatch(fb binding.FlowBuilder, matchKey *types.MatchKey, 
 
 // conjunctionExceptionFlow generates the flow to jump to a specific table if both policyRuleConjunction ID and except address are matched.
 // Keeping this for reference to generic exception flow.
-func (c *client) conjunctionExceptionFlow(conjunctionID uint32, tableID uint8, nextTable uint8, matchKey *types.MatchKey, matchValue interface{}) binding.Flow {
+func (c *featureNetworkPolicy) conjunctionExceptionFlow(conjunctionID uint32, tableID uint8, nextTable uint8, matchKey *types.MatchKey, matchValue interface{}) binding.Flow {
 	conjReg := TFIngressConjIDField
 	if tableID == EgressRuleTable.GetID() {
 		conjReg = TFEgressConjIDField
@@ -2070,7 +2155,7 @@ func (c *client) conjunctionExceptionFlow(conjunctionID uint32, tableID uint8, n
 }
 
 // conjunctiveMatchFlow generates the flow to set conjunctive actions if the match condition is matched.
-func (c *client) conjunctiveMatchFlow(tableID uint8, matchKey *types.MatchKey, matchValue interface{}, priority *uint16, actions []*conjunctiveAction) binding.Flow {
+func (c *featureNetworkPolicy) conjunctiveMatchFlow(tableID uint8, matchKey *types.MatchKey, matchValue interface{}, priority *uint16, actions []*conjunctiveAction) binding.Flow {
 	var ofPriority uint16
 	if priority != nil {
 		ofPriority = *priority
@@ -2089,7 +2174,7 @@ func (c *client) conjunctiveMatchFlow(tableID uint8, matchKey *types.MatchKey, m
 }
 
 // defaultDropFlow generates the flow to drop packets if the match condition is matched.
-func (c *client) defaultDropFlow(table binding.Table, matchKey *types.MatchKey, matchValue interface{}) binding.Flow {
+func (c *featureNetworkPolicy) defaultDropFlow(table binding.Table, matchKey *types.MatchKey, matchValue interface{}) binding.Flow {
 	fb := table.BuildFlow(priorityNormal)
 	if c.enableDenyTracking {
 		return c.addFlowMatch(fb, matchKey, matchValue).
@@ -2106,17 +2191,27 @@ func (c *client) defaultDropFlow(table binding.Table, matchKey *types.MatchKey, 
 		Done()
 }
 
-// dnsPacketInFlow generates the flow to send dns response packets of fqdn policy selected
-// Pods to the fqdnController for processing.
-func (c *client) dnsPacketInFlow(conjunctionID uint32) binding.Flow {
-	return AntreaPolicyIngressRuleTable.BuildFlow(priorityDNSIntercept).
-		MatchConjID(conjunctionID).
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage
+// Tables: AntreaPolicyIngressRuleTable
+// Refactored from:
+//   - func (c *client) dnsPacketInFlow(conjunctionID uint32) binding.Flow
+// dnsPacketInFlow generates the flow to send dns response packets of fqdn policy selected Pods to the fqdnController for
+// processing.
+func (c *featureNetworkPolicy) dnsPacketInFlow(conjunctionID uint32) binding.Flow {
+	return AntreaPolicyIngressRuleTable.ofTable.BuildFlow(priorityDNSIntercept).
 		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
+		MatchConjID(conjunctionID).
 		Action().LoadToRegField(CustomReasonField, CustomReasonDNS).
 		Action().SendToController(uint8(PacketInReasonNP)).
 		Done()
 }
 
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage
+// Tables: IngressRuleTable
+// Refactored from:
+//   - func (c *client) localProbeFlow(localGatewayIPs []net.IP, category cookie.Category) []binding.Flow
 // localProbeFlow generates the flow to forward locally generated packets to ConntrackCommitTable, bypassing ingress
 // rules of Network Policies. The packets are sent by kubelet to probe the liveness/readiness of local Pods.
 // On Linux and when OVS kernel datapath is used, it identifies locally generated packets by matching the
@@ -2127,26 +2222,47 @@ func (c *client) dnsPacketInFlow(conjunctionID uint32) binding.Flow {
 // Note that there is a defect in the latter way that NodePort Service access by external clients will be masqueraded as
 // a local gateway IP to bypass Network Policies. See https://github.com/antrea-io/antrea/issues/280.
 // TODO: Fix it after replacing kube-proxy with AntreaProxy.
-func (c *client) localProbeFlow(localGatewayIPs []net.IP, category cookie.Category) []binding.Flow {
+func (c *featureNetworkPolicy) localProbeFlow(category cookie.Category, ovsDatapathType ovsconfig.OVSDatapathType) []binding.Flow {
 	var flows []binding.Flow
-	if runtime.IsWindowsPlatform() || c.ovsDatapathType == ovsconfig.OVSDatapathNetdev {
-		for _, ip := range localGatewayIPs {
-			ipProtocol := getIPProtocol(ip)
-			flows = append(flows, IngressRuleTable.BuildFlow(priorityHigh).
-				MatchProtocol(ipProtocol).
-				MatchSrcIP(ip).
-				Action().GotoTable(ConntrackCommitTable.GetID()).
+	if runtime.IsWindowsPlatform() || ovsDatapathType == ovsconfig.OVSDatapathNetdev {
+		for ipProtocol, gatewayIP := range c.gatewayIPs {
+			flows = append(flows, IngressRuleTable.ofTable.BuildFlow(priorityHigh).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
+				MatchProtocol(ipProtocol).
+				MatchSrcIP(gatewayIP).
+				Action().GotoStage(binding.ConntrackStage).
 				Done())
 		}
 	} else {
-		flows = append(flows, IngressRuleTable.BuildFlow(priorityHigh).
-			MatchPktMark(types.HostLocalSourceMark, &types.HostLocalSourceMark).
-			Action().GotoTable(ConntrackCommitTable.GetID()).
+		flows = append(flows, IngressRuleTable.ofTable.BuildFlow(priorityHigh).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchPktMark(types.HostLocalSourceMark, &types.HostLocalSourceMark).
+			Action().GotoStage(binding.ConntrackStage).
 			Done())
 	}
 	return flows
+}
+
+// Feature: NetworkPolicy
+// Stage: IngressSecurityStage
+// Tables: IngressClassifierTable
+// New added.
+// ingressClassifierFlows generates the flows to classify the packets from local Pods or the Antrea gateway to different
+// tables within IngressSecurity Stage.
+func (c *featureNetworkPolicy) ingressClassifierFlows(category cookie.Category) []binding.Flow {
+	return []binding.Flow{
+		// This generates the flow to forward the packets to local Pod to next table in IngressSecurity Stage.
+		IngressClassifierTable.ofTable.BuildFlow(priorityNormal).
+			Cookie(c.cookieAllocator.Request(category).Raw()).
+			MatchRegMark(ToLocalRegMark).
+			Action().NextTable().
+			Done(),
+		// This generates the default flow to forward the packets to the last table IngressSecurity Stage.
+		IngressClassifierTable.ofTable.BuildFlow(priorityMiss).
+			Cookie(c.cookieAllocator.Request(category).Raw()).
+			Action().GotoTable(IngressMetricTable.GetID()).
+			Done(),
+	}
 }
 
 // snatSkipNodeFlow installs a flow to skip SNAT for traffic to the transport IP of the a remote Node.

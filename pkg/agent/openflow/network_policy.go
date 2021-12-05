@@ -309,8 +309,8 @@ type conjMatchFlowContext struct {
 	// uninstalled from the switch.
 	actions map[uint32]*conjunctiveAction
 	// denyAllRules is a set to cache the "DENY-ALL" rules that is applied to the matching address in this context.
-	denyAllRules map[uint32]bool
-	client       *client
+	denyAllRules         map[uint32]bool
+	featureNetworkPolicy *featureNetworkPolicy
 	// flow is the conjunctive match flow built from this context. flow needs to be updated if actions are changed.
 	flow binding.Flow
 	// dropflow is the default drop flow built from this context to drop packets in the AppliedToGroup but not pass the
@@ -333,7 +333,7 @@ func (ctx *conjMatchFlowContext) createOrUpdateConjunctiveMatchFlow(actions []*c
 
 		// Create the conjunctive match flow entry. The actions here should not be empty for either add or update case.
 		// The expected operation for a new Openflow entry should be "insertion".
-		flow := ctx.client.conjunctiveMatchFlow(ctx.tableID, ctx.matchKey, ctx.matchValue, ctx.priority, actions)
+		flow := ctx.featureNetworkPolicy.conjunctiveMatchFlow(ctx.tableID, ctx.matchKey, ctx.matchValue, ctx.priority, actions)
 		return &flowChange{
 			flow:       flow,
 			changeType: insertion,
@@ -500,9 +500,9 @@ func (c *conjMatchFlowContextChange) updateContextStatus() {
 	// is "insertion", or delete from the globalConjMatchFlowCache if the ctxChangeType is "deletion".
 	switch c.ctxChangeType {
 	case insertion:
-		c.context.client.globalConjMatchFlowCache[matcherKey] = c.context
+		c.context.featureNetworkPolicy.globalConjMatchFlowCache[matcherKey] = c.context
 	case deletion:
-		delete(c.context.client.globalConjMatchFlowCache, matcherKey)
+		delete(c.context.featureNetworkPolicy.globalConjMatchFlowCache, matcherKey)
 	}
 }
 
@@ -553,15 +553,18 @@ type clause struct {
 }
 
 func (c *client) NewDNSpacketInConjunction(id uint32) error {
-	existingConj := c.getPolicyRuleConjunction(id)
+	existingConj := c.featureNetworkPolicy.getPolicyRuleConjunction(id)
 	if existingConj != nil {
 		klog.InfoS("DNS Conjunction has already been added to cache", "id", id)
 		return nil
 	}
 	conj := &policyRuleConjunction{
 		id:          id,
-		ruleTableID: AntreaPolicyIngressRuleTable.GetID(),
-		actionFlows: []binding.Flow{c.dnsPacketInFlow(id), c.dnsResponseBypassPacketInFlow(), c.dnsResponseBypassConntrackFlow()},
+		ruleTableID: AntreaPolicyIngressRuleTable.ofTable.GetID(),
+		actionFlows: []binding.Flow{
+			c.featureNetworkPolicy.dnsPacketInFlow(id),
+			c.featureNetworkPolicy.dnsResponseBypassPacketInFlow(),
+			c.featureNetworkPolicy.dnsResponseBypassConntrackFlow(c.pipelines[pipelineIP].GetFirstTableInStage(binding.ConntrackStateStage))},
 	}
 	if err := c.ofEntryOperations.AddAll(conj.actionFlows); err != nil {
 		return fmt.Errorf("error when adding action flows for the DNS conjunction: %w", err)
@@ -574,14 +577,14 @@ func (c *client) NewDNSpacketInConjunction(id uint32) error {
 	conj.serviceClause = conj.newClause(1, 2, getTableByID(conj.ruleTableID), nil)
 	conj.toClause = conj.newClause(2, 2, getTableByID(conj.ruleTableID), nil)
 
-	c.conjMatchFlowLock.Lock()
-	defer c.conjMatchFlowLock.Unlock()
-	ctxChanges := conj.serviceClause.addServiceFlows(c, []v1beta2.Service{udpService}, &dnsPriority, true)
-	if err := c.applyConjunctiveMatchFlows(ctxChanges); err != nil {
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	ctxChanges := conj.serviceClause.addServiceFlows(c.featureNetworkPolicy, []v1beta2.Service{udpService}, &dnsPriority, true)
+	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
 		return err
 	}
 	// Add the policyRuleConjunction into policyCache
-	c.policyCache.Add(conj)
+	c.featureNetworkPolicy.policyCache.Add(conj)
 	return nil
 }
 
@@ -595,7 +598,7 @@ func (c *client) DeleteAddressFromDNSConjunction(id uint32, addrs []types.Addres
 	return c.DeletePolicyRuleAddress(id, types.DstAddress, addrs, &dnsPriority)
 }
 
-func (c *clause) addConjunctiveMatchFlow(client *client, match *conjunctiveMatch) *conjMatchFlowContextChange {
+func (c *clause) addConjunctiveMatchFlow(featureNetworkPolicy *featureNetworkPolicy, match *conjunctiveMatch) *conjMatchFlowContextChange {
 	matcherKey := match.generateGlobalMapKey()
 	_, found := c.matches[matcherKey]
 	if found {
@@ -607,19 +610,19 @@ func (c *clause) addConjunctiveMatchFlow(client *client, match *conjunctiveMatch
 	ctxType := modification
 	var dropFlow *flowChange
 	// Get conjMatchFlowContext from globalConjMatchFlowCache. If it doesn't exist, create a new one and add into the cache.
-	context, found = client.globalConjMatchFlowCache[matcherKey]
+	context, found = featureNetworkPolicy.globalConjMatchFlowCache[matcherKey]
 	if !found {
 		context = &conjMatchFlowContext{
-			conjunctiveMatch: match,
-			actions:          make(map[uint32]*conjunctiveAction),
-			client:           client,
+			conjunctiveMatch:     match,
+			actions:              make(map[uint32]*conjunctiveAction),
+			featureNetworkPolicy: featureNetworkPolicy,
 		}
 		ctxType = insertion
 
 		// Generate the default drop flow if dropTable is not nil and the default drop flow is not set yet.
 		if c.dropTable != nil && context.dropFlow == nil {
 			dropFlow = &flowChange{
-				flow:       context.client.defaultDropFlow(c.dropTable, match.matchKey, match.matchValue),
+				flow:       context.featureNetworkPolicy.defaultDropFlow(c.dropTable, match.matchKey, match.matchValue),
 				changeType: insertion,
 			}
 		}
@@ -665,47 +668,52 @@ func generateAddressConjMatch(ruleTableID uint8, addr types.Address, addrType ty
 	return match
 }
 
-func getServiceMatchType(protocol *v1beta2.Protocol, ipv4Enabled, ipv6Enabled, matchSrc bool) []*types.MatchKey {
+func getServiceMatchType(protocol *v1beta2.Protocol, ipProtocols []binding.Protocol, matchSrc bool) []*types.MatchKey {
 	var matchKeys []*types.MatchKey
 	switch *protocol {
 	case v1beta2.ProtocolTCP:
 		if !matchSrc {
-			if ipv4Enabled {
-				matchKeys = append(matchKeys, MatchTCPDstPort)
-			}
-			if ipv6Enabled {
-				matchKeys = append(matchKeys, MatchTCPv6DstPort)
+			for _, ipProtocol := range ipProtocols {
+				if ipProtocol == binding.ProtocolIP {
+					matchKeys = append(matchKeys, MatchTCPDstPort)
+				} else if ipProtocol == binding.ProtocolIPv6 {
+					matchKeys = append(matchKeys, MatchTCPv6DstPort)
+				}
 			}
 		} else {
-			if ipv4Enabled {
-				matchKeys = append(matchKeys, MatchTCPSrcPort)
-			}
-			if ipv6Enabled {
-				matchKeys = append(matchKeys, MatchTCPv6SrcPort)
+			for _, ipProtocol := range ipProtocols {
+				if ipProtocol == binding.ProtocolIP {
+					matchKeys = append(matchKeys, MatchTCPSrcPort)
+				} else if ipProtocol == binding.ProtocolIPv6 {
+					matchKeys = append(matchKeys, MatchTCPv6SrcPort)
+				}
 			}
 		}
 	case v1beta2.ProtocolUDP:
 		if !matchSrc {
-			if ipv4Enabled {
-				matchKeys = append(matchKeys, MatchUDPDstPort)
-			}
-			if ipv6Enabled {
-				matchKeys = append(matchKeys, MatchUDPv6DstPort)
+			for _, ipProtocol := range ipProtocols {
+				if ipProtocol == binding.ProtocolIP {
+					matchKeys = append(matchKeys, MatchUDPDstPort)
+				} else if ipProtocol == binding.ProtocolIPv6 {
+					matchKeys = append(matchKeys, MatchUDPv6DstPort)
+				}
 			}
 		} else {
-			if ipv4Enabled {
-				matchKeys = append(matchKeys, MatchUDPSrcPort)
-			}
-			if ipv6Enabled {
-				matchKeys = append(matchKeys, MatchUDPv6SrcPort)
+			for _, ipProtocol := range ipProtocols {
+				if ipProtocol == binding.ProtocolIP {
+					matchKeys = append(matchKeys, MatchUDPSrcPort)
+				} else if ipProtocol == binding.ProtocolIPv6 {
+					matchKeys = append(matchKeys, MatchUDPv6SrcPort)
+				}
 			}
 		}
 	case v1beta2.ProtocolSCTP:
-		if ipv4Enabled {
-			matchKeys = append(matchKeys, MatchSCTPDstPort)
-		}
-		if ipv6Enabled {
-			matchKeys = append(matchKeys, MatchSCTPv6DstPort)
+		for _, ipProtocol := range ipProtocols {
+			if ipProtocol == binding.ProtocolIP {
+				matchKeys = append(matchKeys, MatchSCTPDstPort)
+			} else if ipProtocol == binding.ProtocolIPv6 {
+				matchKeys = append(matchKeys, MatchSCTPv6DstPort)
+			}
 		}
 	default:
 		matchKeys = []*types.MatchKey{MatchTCPDstPort}
@@ -713,8 +721,8 @@ func getServiceMatchType(protocol *v1beta2.Protocol, ipv4Enabled, ipv6Enabled, m
 	return matchKeys
 }
 
-func generateServicePortConjMatches(ruleTableID uint8, service v1beta2.Service, priority *uint16, ipv4Enabled, ipv6Enabled, matchSrc bool) []*conjunctiveMatch {
-	matchKeys := getServiceMatchType(service.Protocol, ipv4Enabled, ipv6Enabled, matchSrc)
+func generateServicePortConjMatches(ruleTableID uint8, service v1beta2.Service, priority *uint16, ipProtocols []binding.Protocol, matchSrc bool) []*conjunctiveMatch {
+	matchKeys := getServiceMatchType(service.Protocol, ipProtocols, matchSrc)
 	ovsBitRanges := serviceToBitRanges(service)
 	var matches []*conjunctiveMatch
 	for _, matchKey := range matchKeys {
@@ -767,12 +775,12 @@ func serviceToBitRanges(service v1beta2.Service) []types.BitRange {
 
 // addAddrFlows translates the specified addresses to conjunctiveMatchFlows, and returns the corresponding changes on the
 // conjunctiveMatchFlows.
-func (c *clause) addAddrFlows(client *client, addrType types.AddressType, addresses []types.Address, priority *uint16) []*conjMatchFlowContextChange {
+func (c *clause) addAddrFlows(featureNetworkPolicy *featureNetworkPolicy, addrType types.AddressType, addresses []types.Address, priority *uint16) []*conjMatchFlowContextChange {
 	var conjMatchFlowContextChanges []*conjMatchFlowContextChange
 	// Calculate Openflow changes for the added addresses.
 	for _, addr := range addresses {
 		match := generateAddressConjMatch(c.ruleTable.GetID(), addr, addrType, priority)
-		ctxChange := c.addConjunctiveMatchFlow(client, match)
+		ctxChange := c.addConjunctiveMatchFlow(featureNetworkPolicy, match)
 		if ctxChange != nil {
 			conjMatchFlowContextChanges = append(conjMatchFlowContextChanges, ctxChange)
 		}
@@ -782,12 +790,12 @@ func (c *clause) addAddrFlows(client *client, addrType types.AddressType, addres
 
 // addServiceFlows translates the specified NetworkPolicyPorts to conjunctiveMatchFlow, and returns corresponding
 // conjMatchFlowContextChange.
-func (c *clause) addServiceFlows(client *client, ports []v1beta2.Service, priority *uint16, matchSrc bool) []*conjMatchFlowContextChange {
+func (c *clause) addServiceFlows(featureNetworkPolicy *featureNetworkPolicy, ports []v1beta2.Service, priority *uint16, matchSrc bool) []*conjMatchFlowContextChange {
 	var conjMatchFlowContextChanges []*conjMatchFlowContextChange
 	for _, port := range ports {
-		matches := generateServicePortConjMatches(c.ruleTable.GetID(), port, priority, client.networkConfig.IPv4Enabled, client.networkConfig.IPv6Enabled, matchSrc)
+		matches := generateServicePortConjMatches(c.ruleTable.GetID(), port, priority, featureNetworkPolicy.ipProtocols, matchSrc)
 		for _, match := range matches {
-			ctxChange := c.addConjunctiveMatchFlow(client, match)
+			ctxChange := c.addConjunctiveMatchFlow(featureNetworkPolicy, match)
 			conjMatchFlowContextChanges = append(conjMatchFlowContextChanges, ctxChange)
 		}
 	}
@@ -910,11 +918,11 @@ func (c *client) InstallPolicyRuleFlows(rule *types.PolicyRule) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
-	conj := c.calculateActionFlowChangesForRule(rule)
+	conj := c.featureNetworkPolicy.calculateActionFlowChangesForRule(rule)
 
-	c.conjMatchFlowLock.Lock()
-	defer c.conjMatchFlowLock.Unlock()
-	ctxChanges := c.calculateMatchFlowChangesForRule(conj, rule)
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	ctxChanges := c.featureNetworkPolicy.calculateMatchFlowChangesForRule(conj, rule)
 
 	if err := c.ofEntryOperations.AddAll(conj.metricFlows); err != nil {
 		return err
@@ -922,16 +930,16 @@ func (c *client) InstallPolicyRuleFlows(rule *types.PolicyRule) error {
 	if err := c.ofEntryOperations.AddAll(conj.actionFlows); err != nil {
 		return err
 	}
-	if err := c.applyConjunctiveMatchFlows(ctxChanges); err != nil {
+	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
 		return err
 	}
 	// Add the policyRuleConjunction into policyCache
-	c.policyCache.Add(conj)
+	c.featureNetworkPolicy.policyCache.Add(conj)
 	return nil
 }
 
 // calculateActionFlowChangesForRule calculates and updates the actionFlows for the conjunction corresponded to the ofPolicyRule.
-func (c *client) calculateActionFlowChangesForRule(rule *types.PolicyRule) *policyRuleConjunction {
+func (c *featureNetworkPolicy) calculateActionFlowChangesForRule(rule *types.PolicyRule) *policyRuleConjunction {
 	ruleOfID := rule.FlowID
 	// Check if the policyRuleConjunction is added into cache or not. If yes, return nil.
 	conj := c.getPolicyRuleConjunction(ruleOfID)
@@ -943,7 +951,7 @@ func (c *client) calculateActionFlowChangesForRule(rule *types.PolicyRule) *poli
 		id:    ruleOfID,
 		npRef: rule.PolicyRef,
 	}
-	nClause, ruleTable, dropTable := conj.calculateClauses(rule, c)
+	nClause, ruleTable, dropTable := conj.calculateClauses(rule)
 	conj.ruleTableID = rule.TableID
 	_, isEgress := egressTables[rule.TableID]
 	isIngress := !isEgress
@@ -974,7 +982,7 @@ func (c *client) calculateActionFlowChangesForRule(rule *types.PolicyRule) *poli
 }
 
 // calculateMatchFlowChangesForRule calculates the contextChanges for the policyRule, and updates the context status in case of batch install.
-func (c *client) calculateMatchFlowChangesForRule(conj *policyRuleConjunction, rule *types.PolicyRule) []*conjMatchFlowContextChange {
+func (c *featureNetworkPolicy) calculateMatchFlowChangesForRule(conj *policyRuleConjunction, rule *types.PolicyRule) []*conjMatchFlowContextChange {
 	// Calculate the conjMatchFlowContext changes. The changed Openflow entries are included in the conjMatchFlowContext change.
 	ctxChanges := conj.calculateChangesForRuleCreation(c, rule)
 	return ctxChanges
@@ -983,7 +991,7 @@ func (c *client) calculateMatchFlowChangesForRule(conj *policyRuleConjunction, r
 // addRuleToConjunctiveMatch adds a rule's clauses to corresponding conjunctive match contexts.
 // Unlike calculateMatchFlowChangesForRule, it updates the context status directly and doesn't calculate flow changes.
 // It's used in initial batch install where we first add all rules then calculates flows change based on final state.
-func (c *client) addRuleToConjunctiveMatch(conj *policyRuleConjunction, rule *types.PolicyRule) {
+func (c *featureNetworkPolicy) addRuleToConjunctiveMatch(conj *policyRuleConjunction, rule *types.PolicyRule) {
 	if conj.fromClause != nil {
 		for _, addr := range rule.From {
 			match := generateAddressConjMatch(conj.fromClause.ruleTable.GetID(), addr, types.SrcAddress, rule.Priority)
@@ -998,7 +1006,7 @@ func (c *client) addRuleToConjunctiveMatch(conj *policyRuleConjunction, rule *ty
 	}
 	if conj.serviceClause != nil {
 		for _, port := range rule.Service {
-			matches := generateServicePortConjMatches(conj.serviceClause.ruleTable.GetID(), port, rule.Priority, c.networkConfig.IPv4Enabled, c.networkConfig.IPv6Enabled, false)
+			matches := generateServicePortConjMatches(conj.serviceClause.ruleTable.GetID(), port, rule.Priority, c.ipProtocols, false)
 			for _, match := range matches {
 				c.addActionToConjunctiveMatch(conj.serviceClause, match)
 			}
@@ -1009,7 +1017,7 @@ func (c *client) addRuleToConjunctiveMatch(conj *policyRuleConjunction, rule *ty
 // addActionToConjunctiveMatch adds a clause to corresponding conjunctive match context.
 // It updates the context status directly and doesn't calculate the match flow, which is supposed to be calculated after
 // all actions are added. It's used in initial batch install only.
-func (c *client) addActionToConjunctiveMatch(clause *clause, match *conjunctiveMatch) {
+func (c *featureNetworkPolicy) addActionToConjunctiveMatch(clause *clause, match *conjunctiveMatch) {
 	matcherKey := match.generateGlobalMapKey()
 	_, found := clause.matches[matcherKey]
 	if found {
@@ -1022,13 +1030,13 @@ func (c *client) addActionToConjunctiveMatch(clause *clause, match *conjunctiveM
 	context, found = c.globalConjMatchFlowCache[matcherKey]
 	if !found {
 		context = &conjMatchFlowContext{
-			conjunctiveMatch: match,
-			actions:          make(map[uint32]*conjunctiveAction),
-			client:           c,
+			conjunctiveMatch:     match,
+			actions:              make(map[uint32]*conjunctiveAction),
+			featureNetworkPolicy: c,
 		}
 		// Generate the default drop flow if dropTable is not nil.
 		if clause.dropTable != nil {
-			context.dropFlow = context.client.defaultDropFlow(clause.dropTable, match.matchKey, match.matchValue)
+			context.dropFlow = context.featureNetworkPolicy.defaultDropFlow(clause.dropTable, match.matchKey, match.matchValue)
 		}
 		c.globalConjMatchFlowCache[matcherKey] = context
 	}
@@ -1055,14 +1063,14 @@ func (c *client) BatchInstallPolicyRuleFlows(ofPolicyRules []*types.PolicyRule) 
 	var conjunctions []*policyRuleConjunction
 
 	for _, rule := range ofPolicyRules {
-		conj := c.calculateActionFlowChangesForRule(rule)
-		c.addRuleToConjunctiveMatch(conj, rule)
+		conj := c.featureNetworkPolicy.calculateActionFlowChangesForRule(rule)
+		c.featureNetworkPolicy.addRuleToConjunctiveMatch(conj, rule)
 		allFlows = append(allFlows, conj.actionFlows...)
 		allFlows = append(allFlows, conj.metricFlows...)
 		conjunctions = append(conjunctions, conj)
 	}
 
-	for _, ctx := range c.globalConjMatchFlowCache {
+	for _, ctx := range c.featureNetworkPolicy.globalConjMatchFlowCache {
 		// In theory there must be at least one action but InstallPolicyRuleFlows currently handles the 1 clause case
 		// and we do the same in addRuleToConjunctiveMatch. The check is added only for consistency. Later we should
 		// return error if clients install a rule with only 1 clause, and should remove the extra code for processing it.
@@ -1071,7 +1079,7 @@ func (c *client) BatchInstallPolicyRuleFlows(ofPolicyRules []*types.PolicyRule) 
 			for _, action := range ctx.actions {
 				actions = append(actions, action)
 			}
-			ctx.flow = c.conjunctiveMatchFlow(ctx.tableID, ctx.matchKey, ctx.matchValue, ctx.priority, actions)
+			ctx.flow = c.featureNetworkPolicy.conjunctiveMatchFlow(ctx.tableID, ctx.matchKey, ctx.matchValue, ctx.priority, actions)
 			allFlows = append(allFlows, ctx.flow)
 		}
 		if ctx.dropFlow != nil {
@@ -1083,19 +1091,19 @@ func (c *client) BatchInstallPolicyRuleFlows(ofPolicyRules []*types.PolicyRule) 
 	if err := c.ofEntryOperations.AddAll(allFlows); err != nil {
 		// Reset the global conjunctive match flow cache since the OpenFlow bundle, which contains
 		// all the match flows to be installed, was not applied successfully.
-		c.globalConjMatchFlowCache = map[string]*conjMatchFlowContext{}
+		c.featureNetworkPolicy.globalConjMatchFlowCache = map[string]*conjMatchFlowContext{}
 		return err
 	}
 	// Update conjMatchFlowContexts as the expected status.
 	for _, conj := range conjunctions {
 		// Add the policyRuleConjunction into policyCache
-		c.policyCache.Add(conj)
+		c.featureNetworkPolicy.policyCache.Add(conj)
 	}
 	return nil
 }
 
 // applyConjunctiveMatchFlows installs OpenFlow entries on the OVS bridge, and then updates the conjMatchFlowContext.
-func (c *client) applyConjunctiveMatchFlows(flowChanges []*conjMatchFlowContextChange) error {
+func (c *featureNetworkPolicy) applyConjunctiveMatchFlows(flowChanges []*conjMatchFlowContextChange) error {
 	// Send the OpenFlow entries to the OVS bridge.
 	if err := c.sendConjunctiveFlows(flowChanges, []binding.Flow{}); err != nil {
 		return err
@@ -1108,7 +1116,7 @@ func (c *client) applyConjunctiveMatchFlows(flowChanges []*conjMatchFlowContextC
 }
 
 // sendConjunctiveFlows sends all the changed OpenFlow entries to the OVS bridge in a single Bundle.
-func (c *client) sendConjunctiveFlows(changes []*conjMatchFlowContextChange, flows []binding.Flow) error {
+func (c *featureNetworkPolicy) sendConjunctiveFlows(changes []*conjMatchFlowContextChange, flows []binding.Flow) error {
 	var addFlows, modifyFlows, deleteFlows []binding.Flow
 	var flowChanges []*flowChange
 	addFlows = flows
@@ -1159,15 +1167,15 @@ func (c *policyRuleConjunction) newClause(clauseID uint8, nClause uint8, ruleTab
 
 // calculateClauses configures the policyRuleConjunction's clauses according to the PolicyRule. The Openflow entries are
 // not installed on the OVS bridge when calculating the clauses.
-func (c *policyRuleConjunction) calculateClauses(rule *types.PolicyRule, clnt *client) (uint8, binding.Table, binding.Table) {
+func (c *policyRuleConjunction) calculateClauses(rule *types.PolicyRule) (uint8, binding.Table, binding.Table) {
 	var dropTable binding.Table
 	var isEgressRule = false
 	switch rule.Direction {
 	case v1beta2.DirectionOut:
-		dropTable = EgressDefaultTable
+		dropTable = EgressDefaultTable.ofTable
 		isEgressRule = true
 	default:
-		dropTable = IngressDefaultTable
+		dropTable = IngressDefaultTable.ofTable
 	}
 	ruleTable := getTableByID(rule.TableID)
 
@@ -1212,16 +1220,16 @@ func (c *policyRuleConjunction) calculateClauses(rule *types.PolicyRule, clnt *c
 
 // calculateChangesForRuleCreation returns the conjMatchFlowContextChanges of the new policyRuleConjunction. It
 // will calculate the expected conjMatchFlowContext status, and the changed Openflow entries.
-func (c *policyRuleConjunction) calculateChangesForRuleCreation(clnt *client, rule *types.PolicyRule) []*conjMatchFlowContextChange {
+func (c *policyRuleConjunction) calculateChangesForRuleCreation(featureNetworkPolicy *featureNetworkPolicy, rule *types.PolicyRule) []*conjMatchFlowContextChange {
 	var ctxChanges []*conjMatchFlowContextChange
 	if c.fromClause != nil {
-		ctxChanges = append(ctxChanges, c.fromClause.addAddrFlows(clnt, types.SrcAddress, rule.From, rule.Priority)...)
+		ctxChanges = append(ctxChanges, c.fromClause.addAddrFlows(featureNetworkPolicy, types.SrcAddress, rule.From, rule.Priority)...)
 	}
 	if c.toClause != nil {
-		ctxChanges = append(ctxChanges, c.toClause.addAddrFlows(clnt, types.DstAddress, rule.To, rule.Priority)...)
+		ctxChanges = append(ctxChanges, c.toClause.addAddrFlows(featureNetworkPolicy, types.DstAddress, rule.To, rule.Priority)...)
 	}
 	if c.serviceClause != nil {
-		ctxChanges = append(ctxChanges, c.serviceClause.addServiceFlows(clnt, rule.Service, rule.Priority, false)...)
+		ctxChanges = append(ctxChanges, c.serviceClause.addServiceFlows(featureNetworkPolicy, rule.Service, rule.Priority, false)...)
 	}
 	return ctxChanges
 }
@@ -1272,7 +1280,7 @@ func (c *policyRuleConjunction) getAllFlowKeys() []string {
 	return append(flowKeys, dropFlowKeys...)
 }
 
-func (c *client) getPolicyRuleConjunction(ruleID uint32) *policyRuleConjunction {
+func (c *featureNetworkPolicy) getPolicyRuleConjunction(ruleID uint32) *policyRuleConjunction {
 	conj, found, _ := c.policyCache.GetByKey(fmt.Sprint(ruleID))
 	if !found {
 		return nil
@@ -1281,7 +1289,7 @@ func (c *client) getPolicyRuleConjunction(ruleID uint32) *policyRuleConjunction 
 }
 
 func (c *client) GetPolicyInfoFromConjunction(ruleID uint32) (string, string) {
-	conjunction := c.getPolicyRuleConjunction(ruleID)
+	conjunction := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
 	if conjunction == nil {
 		return "", ""
 	}
@@ -1299,12 +1307,12 @@ func (c *client) UninstallPolicyRuleFlows(ruleID uint32) ([]string, error) {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
-	conj := c.getPolicyRuleConjunction(ruleID)
+	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
 	if conj == nil {
 		klog.V(2).Infof("policyRuleConjunction with ID %d not found", ruleID)
 		return nil, nil
 	}
-	staleOFPriorities := c.getStalePriorities(conj)
+	staleOFPriorities := c.featureNetworkPolicy.getStalePriorities(conj)
 	// Delete action flows from the OVS bridge.
 	if err := c.ofEntryOperations.DeleteAll(conj.actionFlows); err != nil {
 		return nil, err
@@ -1313,24 +1321,24 @@ func (c *client) UninstallPolicyRuleFlows(ruleID uint32) ([]string, error) {
 		return nil, err
 	}
 
-	c.conjMatchFlowLock.Lock()
-	defer c.conjMatchFlowLock.Unlock()
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
 	// Get the conjMatchFlowContext changes.
 	ctxChanges := conj.calculateChangesForRuleDeletion()
 	// Send the changed OpenFlow entries to the OVS bridge and update the conjMatchFlowContext.
-	if err := c.applyConjunctiveMatchFlows(ctxChanges); err != nil {
+	if err := c.featureNetworkPolicy.applyConjunctiveMatchFlows(ctxChanges); err != nil {
 		return nil, err
 	}
 
-	c.policyCache.Delete(conj)
+	c.featureNetworkPolicy.policyCache.Delete(conj)
 	return staleOFPriorities, nil
 }
 
 // getStalePriorities returns the ofPriorities that will be stale on the rule table where the
 // policyRuleConjunction is installed, after the deletion of that policyRuleConjunction.
-func (c *client) getStalePriorities(conj *policyRuleConjunction) (staleOFPriorities []string) {
+func (c *featureNetworkPolicy) getStalePriorities(conj *policyRuleConjunction) (staleOFPriorities []string) {
 	var ofPrioritiesPotentiallyStale []string
-	if conj.ruleTableID != IngressRuleTable.GetID() && conj.ruleTableID != EgressRuleTable.GetID() {
+	if conj.ruleTableID != IngressRuleTable.ofTable.GetID() && conj.ruleTableID != EgressRuleTable.ofTable.GetID() {
 		ofPrioritiesPotentiallyStale = conj.ActionFlowPriorities()
 	}
 	klog.V(4).Infof("Potential stale ofpriority %v found", ofPrioritiesPotentiallyStale)
@@ -1355,7 +1363,7 @@ func (c *client) getStalePriorities(conj *policyRuleConjunction) (staleOFPriorit
 	return staleOFPriorities
 }
 
-func (c *client) replayPolicyFlows() {
+func (c *featureNetworkPolicy) replayPolicyFlows() []binding.Flow {
 	var flows []binding.Flow
 	addActionFlows := func(conj *policyRuleConjunction) {
 		for _, flow := range conj.actionFlows {
@@ -1389,9 +1397,7 @@ func (c *client) replayPolicyFlows() {
 	for _, ctx := range c.globalConjMatchFlowCache {
 		addMatchFlows(ctx)
 	}
-	if err := c.ofEntryOperations.AddAll(flows); err != nil {
-		klog.Errorf("Error when replaying flows: %v", err)
-	}
+	return flows
 }
 
 // AddPolicyRuleAddress adds one or multiple addresses to the specified NetworkPolicy rule. If addrType is srcAddress, the
@@ -1400,7 +1406,7 @@ func (c *client) AddPolicyRuleAddress(ruleID uint32, addrType types.AddressType,
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
-	conj := c.getPolicyRuleConjunction(ruleID)
+	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
 	// If policyRuleConjunction doesn't exist in client's policyCache return not found error. It should not happen, since
 	// NetworkPolicyController will guarantee the policyRuleConjunction is created before this method is called. The check
 	// here is for safety.
@@ -1413,10 +1419,10 @@ func (c *client) AddPolicyRuleAddress(ruleID uint32, addrType types.AddressType,
 		return fmt.Errorf("no clause is using addrType %d", addrType)
 	}
 
-	c.conjMatchFlowLock.Lock()
-	defer c.conjMatchFlowLock.Unlock()
-	flowChanges := clause.addAddrFlows(c, addrType, addresses, priority)
-	return c.applyConjunctiveMatchFlows(flowChanges)
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
+	flowChanges := clause.addAddrFlows(c.featureNetworkPolicy, addrType, addresses, priority)
+	return c.featureNetworkPolicy.applyConjunctiveMatchFlows(flowChanges)
 }
 
 // DeletePolicyRuleAddress removes addresses from the specified NetworkPolicy rule. If addrType is srcAddress, the addresses
@@ -1425,7 +1431,7 @@ func (c *client) DeletePolicyRuleAddress(ruleID uint32, addrType types.AddressTy
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
-	conj := c.getPolicyRuleConjunction(ruleID)
+	conj := c.featureNetworkPolicy.getPolicyRuleConjunction(ruleID)
 	// If policyRuleConjunction doesn't exist in client's policyCache return not found error. It should not happen, since
 	// NetworkPolicyController will guarantee the policyRuleConjunction is created before this method is called. The check
 	//	here is for safety.
@@ -1439,12 +1445,12 @@ func (c *client) DeletePolicyRuleAddress(ruleID uint32, addrType types.AddressTy
 		return fmt.Errorf("no clause is using addrType %d", addrType)
 	}
 
-	c.conjMatchFlowLock.Lock()
-	defer c.conjMatchFlowLock.Unlock()
+	c.featureNetworkPolicy.conjMatchFlowLock.Lock()
+	defer c.featureNetworkPolicy.conjMatchFlowLock.Unlock()
 	// Remove policyRuleConjunction to actions of conjunctive match using specific address.
 	changes := clause.deleteAddrFlows(addrType, addresses, priority)
 	// Update the Openflow entries on the OVS bridge, and update local cache.
-	return c.applyConjunctiveMatchFlows(changes)
+	return c.featureNetworkPolicy.applyConjunctiveMatchFlows(changes)
 }
 
 func (c *client) GetNetworkPolicyFlowKeys(npName, npNamespace string) []string {
@@ -1457,7 +1463,7 @@ func (c *client) GetNetworkPolicyFlowKeys(npName, npNamespace string) []string {
 	c.replayMutex.Lock()
 	defer c.replayMutex.Unlock()
 
-	for _, conjObj := range c.policyCache.List() {
+	for _, conjObj := range c.featureNetworkPolicy.policyCache.List() {
 		conj := conjObj.(*policyRuleConjunction)
 		if conj.npRef.Name == npName && conj.npRef.Namespace == npNamespace {
 			// There can be duplicated flows added due to conjunctive matches
@@ -1500,7 +1506,7 @@ func getMatchFlowUpdates(conj *policyRuleConjunction, newPriority uint16) (add, 
 //  be re-assigned priority 98. This operation will issue a delFlow <priority=99,ip,reg1=0x1f>, which
 //  would essentially void the add flow for conj=1.
 // In this case, we remove the conflicting delFlow and set addFlow as a modifyFlow.
-func (c *client) processFlowUpdates(addFlows, delFlows []binding.Flow) (add, update, del []binding.Flow) {
+func (c *featureNetworkPolicy) processFlowUpdates(addFlows, delFlows []binding.Flow) (add, update, del []binding.Flow) {
 	for _, a := range addFlows {
 		matched := false
 		for i := 0; i < len(delFlows); i++ {
@@ -1524,7 +1530,7 @@ func (c *client) processFlowUpdates(addFlows, delFlows []binding.Flow) (add, upd
 
 // updateConjunctionActionFlows constructs a new policyRuleConjunction with actionFlows updated to be
 // stored in the policyCache.
-func (c *client) updateConjunctionActionFlows(conj *policyRuleConjunction, updates flowUpdates) *policyRuleConjunction {
+func (c *featureNetworkPolicy) updateConjunctionActionFlows(conj *policyRuleConjunction, updates flowUpdates) *policyRuleConjunction {
 	newActionFlows := make([]binding.Flow, len(conj.actionFlows))
 	copy(newActionFlows, updates.newActionFlows)
 	newConj := &policyRuleConjunction{
@@ -1540,7 +1546,7 @@ func (c *client) updateConjunctionActionFlows(conj *policyRuleConjunction, updat
 }
 
 // updateConjunctionMatchFlows updates the conjuctiveMatchFlows in a policyRuleConjunction.
-func (c *client) updateConjunctionMatchFlows(conj *policyRuleConjunction, newPriority uint16) {
+func (c *featureNetworkPolicy) updateConjunctionMatchFlows(conj *policyRuleConjunction, newPriority uint16) {
 	allClause := []*clause{conj.fromClause, conj.toClause, conj.serviceClause}
 	for _, cl := range allClause {
 		if cl == nil {
@@ -1561,7 +1567,7 @@ func (c *client) updateConjunctionMatchFlows(conj *policyRuleConjunction, newPri
 }
 
 // calculateFlowUpdates calculates the flow updates required for the priority re-assignments specified in the input map.
-func (c *client) calculateFlowUpdates(updates map[uint16]uint16, table uint8) (addFlows, delFlows []binding.Flow,
+func (c *featureNetworkPolicy) calculateFlowUpdates(updates map[uint16]uint16, table uint8) (addFlows, delFlows []binding.Flow,
 	conjFlowUpdates map[uint32]flowUpdates) {
 	conjFlowUpdates = map[uint32]flowUpdates{}
 	for original, newPriority := range updates {
@@ -1601,19 +1607,19 @@ func (c *client) calculateFlowUpdates(updates map[uint16]uint16, table uint8) (a
 // ReassignFlowPriorities takes a list of priority updates, and update the actionFlows to replace
 // the old priority with the desired one, for each priority update.
 func (c *client) ReassignFlowPriorities(updates map[uint16]uint16, table uint8) error {
-	addFlows, delFlows, conjFlowUpdates := c.calculateFlowUpdates(updates, table)
-	add, update, del := c.processFlowUpdates(addFlows, delFlows)
+	addFlows, delFlows, conjFlowUpdates := c.featureNetworkPolicy.calculateFlowUpdates(updates, table)
+	add, update, del := c.featureNetworkPolicy.processFlowUpdates(addFlows, delFlows)
 	// Commit the flows updates calculated.
 	err := c.bridge.AddFlowsInBundle(add, update, del)
 	if err != nil {
 		return err
 	}
 	for conjID, actionUpdates := range conjFlowUpdates {
-		originalConj, _, _ := c.policyCache.GetByKey(fmt.Sprint(conjID))
+		originalConj, _, _ := c.featureNetworkPolicy.policyCache.GetByKey(fmt.Sprint(conjID))
 		conj := originalConj.(*policyRuleConjunction)
-		updatedConj := c.updateConjunctionActionFlows(conj, actionUpdates)
-		c.updateConjunctionMatchFlows(updatedConj, actionUpdates.newPriority)
-		c.policyCache.Update(updatedConj)
+		updatedConj := c.featureNetworkPolicy.updateConjunctionActionFlows(conj, actionUpdates)
+		c.featureNetworkPolicy.updateConjunctionMatchFlows(updatedConj, actionUpdates.newPriority)
+		c.featureNetworkPolicy.policyCache.Update(updatedConj)
 	}
 	return nil
 }
@@ -1677,8 +1683,8 @@ func parseMetricFlow(flow string) (uint32, types.RuleMetric) {
 
 func (c *client) NetworkPolicyMetrics() map[uint32]*types.RuleMetric {
 	result := map[uint32]*types.RuleMetric{}
-	egressFlows, _ := c.ovsctlClient.DumpTableFlows(EgressMetricTable.GetID())
-	ingressFlows, _ := c.ovsctlClient.DumpTableFlows(IngressMetricTable.GetID())
+	egressFlows, _ := c.ovsctlClient.DumpTableFlows(EgressMetricTable.ofTable.GetID())
+	ingressFlows, _ := c.ovsctlClient.DumpTableFlows(IngressMetricTable.ofTable.GetID())
 
 	collectMetricsFromFlows := func(flows []string) {
 		for _, flow := range flows {

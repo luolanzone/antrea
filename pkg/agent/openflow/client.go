@@ -507,7 +507,7 @@ func (c *client) InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP,
 	if c.networkConfig.TrafficEncapMode.IsNetworkPolicyOnly() {
 		// In policy-only mode, traffic to local Pod is routed based on destination IP.
 		flows = append(flows,
-			c.l3FwdFlowRouteToPod(podInterfaceIPs, podInterfaceMAC, cookie.Pod)...,
+			c.featureNetworkPolicy.l3FwdFlowRouteToPod(cookie.Pod, podInterfaceIPs, podInterfaceMAC)...,
 		)
 	}
 
@@ -709,8 +709,8 @@ func (c *client) InstallGatewayFlows() error {
 	}
 
 	// Add flow to ensure the liveness check packet could be forwarded correctly.
-	flows = append(flows, c.localProbeFlow(gatewayIPs, cookie.Default)...)
-	flows = append(flows, c.l3FwdFlowToGateway(gatewayIPs, gatewayConfig.MAC, cookie.Default)...)
+	flows = append(flows, c.featureNetworkPolicy.localProbeFlow(cookie.Default, c.ovsDatapathType)...)
+	flows = append(flows, c.featurePodConnectivity.l3FwdFlowToGateway(cookie.Default)...)
 
 	if err := c.ofEntryOperations.AddAll(flows); err != nil {
 		return err
@@ -992,7 +992,9 @@ func (c *client) ReplayFlows() {
 	c.podFlowCache.Range(installCachedFlows)
 	c.serviceFlowCache.Range(installCachedFlows)
 
-	c.replayPolicyFlows()
+	if err := c.ofEntryOperations.AddAll(c.featureNetworkPolicy.replayPolicyFlows()); err != nil {
+		klog.Errorf("Error when replaying flows: %v", err)
+	}
 
 	if c.enableMulticast {
 		c.mcastFlowCache.Range(installCachedFlows)
@@ -1095,16 +1097,16 @@ func (c *client) SendTraceflowPacket(dataplaneTag uint8, packet *binding.Packet,
 
 func (c *client) InstallTraceflowFlows(dataplaneTag uint8, liveTraffic, droppedOnly, receiverOnly bool, packet *binding.Packet, ofPort uint32, timeoutSeconds uint16) error {
 	cacheKey := fmt.Sprintf("%x", dataplaneTag)
-	flows := []binding.Flow{}
-	flows = append(flows, c.traceflowConnectionTrackFlows(dataplaneTag, receiverOnly, packet, ofPort, timeoutSeconds, cookie.Default)...)
-	flows = append(flows, c.traceflowL2ForwardOutputFlows(dataplaneTag, liveTraffic, droppedOnly, timeoutSeconds, cookie.Default)...)
-	flows = append(flows, c.traceflowNetworkPolicyFlows(dataplaneTag, timeoutSeconds, cookie.Default)...)
-	return c.addFlows(c.tfFlowCache, cacheKey, flows)
+	var flows []binding.Flow
+	flows = append(flows, c.featureTraceflow.traceflowConnectionTrackFlows(cookie.Default, dataplaneTag, receiverOnly, packet, ofPort, timeoutSeconds)...)
+	flows = append(flows, c.featureTraceflow.traceflowL2ForwardOutputFlows(cookie.Default, dataplaneTag, liveTraffic, droppedOnly, timeoutSeconds)...)
+	flows = append(flows, c.featureTraceflow.traceflowNetworkPolicyFlows(cookie.Default, c.featureNetworkPolicy, dataplaneTag, timeoutSeconds)...)
+	return c.addFlows(c.featureTraceflow.tfFlowCache, cacheKey, flows)
 }
 
 func (c *client) UninstallTraceflowFlows(dataplaneTag uint8) error {
 	cacheKey := fmt.Sprintf("%x", dataplaneTag)
-	return c.deleteFlows(c.tfFlowCache, cacheKey)
+	return c.deleteFlows(c.featureTraceflow.tfFlowCache, cacheKey)
 }
 
 // Add TLV map optClass 0x0104, optType 0x80 optLength 4 tunMetadataIndex 0 to store data plane tag

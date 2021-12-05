@@ -32,6 +32,7 @@ import (
 	"k8s.io/component-base/metrics/legacyregistry"
 
 	"antrea.io/antrea/pkg/agent/metrics"
+	"antrea.io/antrea/pkg/agent/openflow"
 	proxytypes "antrea.io/antrea/pkg/agent/proxy/types"
 	agenttypes "antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/apis/controlplane/v1beta2"
@@ -197,7 +198,20 @@ func newNetworkPolicyWithMultipleRules(name string, uid types.UID, from, to, app
 	}
 }
 
+func prepareMockTables() {
+	openflow.InitMockTables(
+		map[*openflow.FeatureTable]uint8{
+			openflow.AntreaPolicyEgressRuleTable:  uint8(5),
+			openflow.EgressRuleTable:              uint8(6),
+			openflow.EgressDefaultTable:           uint8(7),
+			openflow.AntreaPolicyIngressRuleTable: uint8(12),
+			openflow.IngressRuleTable:             uint8(13),
+			openflow.IngressDefaultTable:          uint8(14),
+		})
+}
+
 func TestAddSingleGroupRule(t *testing.T) {
+	prepareMockTables()
 	controller, clientset, reconciler := newTestController()
 	addressGroupWatcher := watch.NewFake()
 	appliedToGroupWatcher := watch.NewFake()
@@ -277,6 +291,7 @@ func TestAddSingleGroupRule(t *testing.T) {
 }
 
 func TestAddMultipleGroupsRule(t *testing.T) {
+	prepareMockTables()
 	controller, clientset, reconciler := newTestController()
 	addressGroupWatcher := watch.NewFake()
 	appliedToGroupWatcher := watch.NewFake()
@@ -356,6 +371,7 @@ func TestAddMultipleGroupsRule(t *testing.T) {
 }
 
 func TestDeleteRule(t *testing.T) {
+	prepareMockTables()
 	controller, clientset, reconciler := newTestController()
 	addressGroupWatcher := watch.NewFake()
 	appliedToGroupWatcher := watch.NewFake()
@@ -403,6 +419,7 @@ func TestDeleteRule(t *testing.T) {
 }
 
 func TestAddNetworkPolicyWithMultipleRules(t *testing.T) {
+	prepareMockTables()
 	controller, clientset, reconciler := newTestController()
 	addressGroupWatcher := watch.NewFake()
 	appliedToGroupWatcher := watch.NewFake()
@@ -485,6 +502,7 @@ func TestAddNetworkPolicyWithMultipleRules(t *testing.T) {
 }
 
 func TestNetworkPolicyMetrics(t *testing.T) {
+	prepareMockTables()
 	// Initialize NetworkPolicy metrics (prometheus)
 	metrics.InitializeNetworkPolicyMetrics()
 	controller, clientset, reconciler := newTestController()

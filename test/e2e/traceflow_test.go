@@ -337,10 +337,6 @@ func testTraceflowIntraNode(t *testing.T, data *TestData) {
 	}
 
 	expectedTTL := int32(64)
-	if testOptions.enableAntreaIPAM {
-		// AntreaIPAM will always overwrite dstMAC and decrease TTL
-		expectedTTL = 63
-	}
 	testcases := []testcase{
 		{
 			name:      "intraNodeTraceflowIPv4",
@@ -1935,6 +1931,9 @@ func testTraceflowInterNode(t *testing.T, data *TestData) {
 		for _, tc := range testcases {
 			tc := tc
 			t.Run(tc.name, func(t *testing.T) {
+				if tc.name == "hairpinServiceTraceflowIPv4" {
+					skipIfProviderIs(t, "kind", "There is a bug of OVS in netdev mode for running this test")
+				}
 				t.Parallel()
 				runTestTraceflow(t, data, tc)
 			})

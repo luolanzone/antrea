@@ -966,7 +966,7 @@ func (c *client) ReplayFlows() {
 	}
 
 	if c.enableMulticast {
-		c.mcastFlowCache.Range(installCachedFlows)
+		c.featureMulticast.mcastFlowCache.Range(installCachedFlows)
 	}
 }
 
@@ -1222,27 +1222,27 @@ func (c *client) SendUDPPacketOut(
 }
 
 func (c *client) InstallMulticastInitialFlows(pktInReason uint8) error {
-	flows := c.igmpPktInFlows(pktInReason)
-	flows = append(flows, c.externalMulticastReceiverFlow())
+	flows := c.featureMulticast.igmpPktInFlows(pktInReason)
+	flows = append(flows, c.featureMulticast.externalMulticastReceiverFlow())
 	cacheKey := fmt.Sprintf("multicast")
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	return c.addFlows(c.mcastFlowCache, cacheKey, flows)
+	return c.addFlows(c.featureMulticast.mcastFlowCache, cacheKey, flows)
 }
 
 func (c *client) InstallMulticastFlow(multicastIP net.IP) error {
-	flows := c.localMulticastForwardFlow(multicastIP)
+	flows := c.featureMulticast.localMulticastForwardFlow(multicastIP)
 	cacheKey := fmt.Sprintf("multicast_%s", multicastIP.String())
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	return c.addFlows(c.mcastFlowCache, cacheKey, flows)
+	return c.addFlows(c.featureMulticast.mcastFlowCache, cacheKey, flows)
 }
 
 func (c *client) UninstallMulticastFlow(multicastIP net.IP) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 	cacheKey := fmt.Sprintf("multicast_%s", multicastIP.String())
-	return c.deleteFlows(c.mcastFlowCache, cacheKey)
+	return c.deleteFlows(c.featureMulticast.mcastFlowCache, cacheKey)
 }
 
 func (c *client) SendIGMPQueryPacketOut(

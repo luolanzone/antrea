@@ -1318,7 +1318,7 @@ func (c *featurePodConnectivity) l3FwdFlowToPod(category cookie.Category,
 			// The common conditions are:
 			//   - the traffic mode is noEncap.
 			//   - Pod / Antrea Pod is not in host network.
-			// All traffic models are:
+			// Corresponding traffic models are:
 			//   01. Pod                            -- Service [request/reply]             --> Antrea Pod
 			//   02. Antrea Pod                     -- Service [request/reply]             --> Antrea Pod
 			//   03. Antrea Pod                     -- Service [request][hairpin]          --> Antrea Pod, HairpinRegMark
@@ -1349,7 +1349,7 @@ func (c *featurePodConnectivity) l3FwdFlowToPod(category cookie.Category,
 			// The common conditions are:
 			//   - with RewriteMACRegMark.
 			//   - Pod / Antrea Pod is not in host network.
-			// All traffic models are:
+			// Corresponding traffic models are:
 			//   01. Pod                            -- Service [request/reply]             --> Pod
 			//   02. Pod                            -- Service [request][hairpin]          --> Pod, HairpinRegMark
 			//   03. Gateway                        -- Service [request]                   --> Pod, NotRequireSNATRegMark(+new+trk)
@@ -1379,7 +1379,7 @@ func (c *featurePodConnectivity) l3FwdFlowToPod(category cookie.Category,
 	return flows
 }
 
-// Feature: NetworkPolicy
+// Feature: PodConnectivity
 // Stage: RoutingStage
 // Tables: L3ForwardingTable
 // Requirements: networkPolicyOnly mode
@@ -1387,7 +1387,7 @@ func (c *featurePodConnectivity) l3FwdFlowToPod(category cookie.Category,
 //   - func (c *client) l3FwdFlowRouteToPod(podInterfaceIPs []net.IP, podInterfaceMAC net.HardwareAddr, category cookie.Category) []binding.Flow
 // l3FwdFlowRouteToPod generates the flows to route the packets to a Pod based on the destination IP. It rewrites destination
 // MAC to the Pod interface's MAC. The flows are used in networkPolicyOnly mode to match the packets from the Antrea gateway.
-func (c *featureNetworkPolicy) l3FwdFlowRouteToPod(category cookie.Category,
+func (c *featurePodConnectivity) l3FwdFlowRouteToPod(category cookie.Category,
 	podInterfaceIPs []net.IP,
 	podInterfaceMAC net.HardwareAddr) []binding.Flow {
 	var flows []binding.Flow
@@ -1405,7 +1405,7 @@ func (c *featureNetworkPolicy) l3FwdFlowRouteToPod(category cookie.Category,
 	return flows
 }
 
-// Feature: NetworkPolicy
+// Feature: PodConnectivity
 // Stage: RoutingStage
 // Tables: L3ForwardingTable
 // Requirements: networkPolicyOnly mode
@@ -1414,14 +1414,14 @@ func (c *featureNetworkPolicy) l3FwdFlowRouteToPod(category cookie.Category,
 // l3FwdFlowRouteToGW generates the flows to route the packets to the Antrea gateway. It rewrites destination MAC to the
 // Antrea gateway interface's MAC. The flows are used in networkPolicyOnly mode to match the packets sourced from a local Pod
 // and destined for remote Pods, Nodes, or external network.
-func (c *featureNetworkPolicy) l3FwdFlowRouteToGW(category cookie.Category) []binding.Flow {
+func (c *featurePodConnectivity) l3FwdFlowRouteToGW(category cookie.Category) []binding.Flow {
 	var flows []binding.Flow
 	for _, ipProtocol := range c.ipProtocols {
 		flows = append(flows, L3ForwardingTable.ofTable.BuildFlow(priorityLow).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
 			MatchProtocol(ipProtocol).
 			Action().LoadRegMark(ToExternalRegMark).
-			Action().SetDstMAC(c.gatewayMAC).
+			Action().SetDstMAC(c.nodeConfig.GatewayConfig.MAC).
 			Action().NextTable().
 			Done(),
 		)
@@ -1446,7 +1446,7 @@ func (c *featurePodConnectivity) l3FwdFlowToGateway(category cookie.Category) []
 			// The common conditions are:
 			//   - with RewriteMACRegMark
 			//   - Pod / Antrea Pod is not in host network.
-			// All traffic models are:
+			// Corresponding traffic models are:
 			//   01. Pod                       -- Service [reply]                              --> Gateway
 			//   02. Remote Pod(via Tunnel)    -- Service [reply][encap]                       --> Gateway
 			//   03. Remote Pod(via Tunnel)    -- Connect [request/reply][encap]               --> Gateway
@@ -1485,7 +1485,7 @@ func (c *featurePodConnectivity) l3FwdFlowToGateway(category cookie.Category) []
 		// This generates the flow to match the reply packets of connections with FromGatewayCTMark from local Pods.
 		// For simplicity, in the following:
 		//   - per-Node IPAM Pod is referred to as Pod.
-		// All traffic models are:
+		// Corresponding traffic models are:
 		//   01. Pod                       -- Service [reply]         --> Pod, AntreaProxy is disabled and kube-proxy is used.
 		//   02. Pod                       -- NodePortLocal [reply]   --> Pod, AntreaProxy is enabled or not.
 		flows = append(flows,
@@ -1504,7 +1504,7 @@ func (c *featurePodConnectivity) l3FwdFlowToGateway(category cookie.Category) []
 		// from remote Pods via tunnel.
 		// For simplicity, in the following:
 		//   - per-Node IPAM Pod is referred to as Pod.
-		// All traffic models are:
+		// Corresponding traffic models are:
 		//   01. Remote Pod(via Tunnel)    -- Service [reply]         --> Pod, AntreaProxy is disabled and kube-proxy is used.
 		//   02. Remote Pod(via Tunnel)    -- NodePortLocal [reply]   --> Pod, AntreaProxy is enabled or not.
 		if c.networkConfig.TrafficEncapMode.SupportsEncap() {
@@ -1541,7 +1541,7 @@ func (c *featurePodConnectivity) l3FwdFlowToRemoteViaTun(category cookie.Categor
 	// The common conditions are:
 	//   - the traffic mode is encap.
 	//   - Pod / Antrea Pod is not in host network.
-	// All traffic models are:
+	// Corresponding traffic models are:
 	//   01. Pod          -- Service [request/reply]      --> Remote Pod
 	//   02. Pod          -- Connect [request/reply]      --> Remote Pod
 	//   03. Gateway      -- Service [request]            --> Remote Pod, RequireSNATRegMark(+new+trk)
@@ -1579,7 +1579,7 @@ func (c *featurePodConnectivity) l3FwdFlowToRemoteViaGW(category cookie.Category
 	//   - Pod / Antrea Pod is not in host network.
 	//   - for a Linux Node, this is used to forward packets to other remote Nodes.
 	//   - for a Windows Node, this is used to forward packets other Nodes whose transport interface MAC is unknown.
-	// All traffic models are:
+	// Corresponding traffic models are:
 	//   01. Pod          -- Service [request/reply]      --> Remote Pod
 	//   02. Pod          -- Connect [request/reply]      --> Remote Pod
 	//   03. Gateway      -- Service [request][hairpin]   --> Remote Pod, RequireSNATRegMark(+new+trk)
@@ -1615,7 +1615,7 @@ func (c *featurePodConnectivity) l3FwdFlowToRemoteViaUplink(category cookie.Cate
 		//   - traffic mode is noEncap.
 		//   - Pod / Antrea Pod is not in host network.
 		//   - for a Windows Node, this is used to forward the packets to other Nodes whose transport interface's MAC is unknown.
-		// All traffic models are:
+		// Corresponding traffic models are:
 		//   01. Pod          -- Service [request/reply]      --> Remote Pod
 		//   02. Pod          -- Connect [request/reply]      --> Remote Pod
 		//   03. Gateway      -- Service [reply]              --> Remote Pod, RequireSNATRegMark(+new+trk)
@@ -1652,7 +1652,7 @@ func (c *featurePodConnectivity) l3FwdFlowToRemoteViaUplink(category cookie.Cate
 		//   - traffic mode is noEncap.
 		//   - Pod / Antrea Pod is not in host network.
 		//   - Linux Node only.
-		// All traffic models are:
+		// Corresponding traffic models are:
 		//   01. Antrea Pod          -- Service [request/reply]   --> Remote Pod
 		//   02. Antrea Pod          -- Connect [request/reply]   --> Remote Pod
 		flows = append(flows, L3ForwardingTable.ofTable.BuildFlow(priorityNormal).
@@ -1693,7 +1693,7 @@ func (c *featurePodConnectivity) arpResponderFlow(category cookie.Category, ipAd
 		Done()
 }
 
-// Feature: NetworkPolicy
+// Feature: PodConnectivity
 // Stage: ClassifierStage
 // Tables: ARPResponderTable
 // Requirements: networkPolicyOnly mode.
@@ -1701,7 +1701,7 @@ func (c *featurePodConnectivity) arpResponderFlow(category cookie.Category, ipAd
 //   - func (c *client) arpResponderStaticFlow(category cookie.Category) binding.Flow
 // arpResponderStaticFlow generates the flow to reply for any ARP request with the same global virtual MAC. It is used
 // in policy-only mode, where traffic are routed via IP not MAC.
-func (c *featureNetworkPolicy) arpResponderStaticFlow(category cookie.Category) binding.Flow {
+func (c *featurePodConnectivity) arpResponderStaticFlow(category cookie.Category) binding.Flow {
 	return ARPResponderTable.ofTable.BuildFlow(priorityNormal).
 		Cookie(c.cookieAllocator.Request(category).Raw()).
 		MatchProtocol(binding.ProtocolARP).
@@ -2426,9 +2426,9 @@ func (c *featureNetworkPolicy) dnsPacketInFlow(conjunctionID uint32) binding.Flo
 		Done()
 }
 
-// Feature: NetworkPolicy
+// Feature: PodConnectivity
 // Stage: IngressSecurityStage
-// Tables: IngressRuleTable
+// Tables: IngressClassifierTable
 // Refactored from:
 //   - func (c *client) localProbeFlow(localGatewayIPs []net.IP, category cookie.Category) []binding.Flow
 // localProbeFlow generates the flow to forward locally generated packets to ConntrackCommitTable, bypassing ingress
@@ -2441,11 +2441,11 @@ func (c *featureNetworkPolicy) dnsPacketInFlow(conjunctionID uint32) binding.Flo
 // Note that there is a defect in the latter way that NodePort Service access by external clients will be masqueraded as
 // a local gateway IP to bypass Network Policies. See https://github.com/antrea-io/antrea/issues/280.
 // TODO: Fix it after replacing kube-proxy with AntreaProxy.
-func (c *featureNetworkPolicy) localProbeFlow(category cookie.Category, ovsDatapathType ovsconfig.OVSDatapathType) []binding.Flow {
+func (c *featurePodConnectivity) localProbeFlow(category cookie.Category, ovsDatapathType ovsconfig.OVSDatapathType) []binding.Flow {
 	var flows []binding.Flow
 	if runtime.IsWindowsPlatform() || ovsDatapathType == ovsconfig.OVSDatapathNetdev {
 		for ipProtocol, gatewayIP := range c.gatewayIPs {
-			flows = append(flows, IngressRuleTable.ofTable.BuildFlow(priorityHigh).
+			flows = append(flows, IngressClassifierTable.ofTable.BuildFlow(priorityHigh).
 				Cookie(c.cookieAllocator.Request(category).Raw()).
 				MatchProtocol(ipProtocol).
 				MatchSrcIP(gatewayIP).
@@ -2453,7 +2453,7 @@ func (c *featureNetworkPolicy) localProbeFlow(category cookie.Category, ovsDatap
 				Done())
 		}
 	} else {
-		flows = append(flows, IngressRuleTable.ofTable.BuildFlow(priorityHigh).
+		flows = append(flows, IngressClassifierTable.ofTable.BuildFlow(priorityHigh).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
 			MatchPktMark(types.HostLocalSourceMark, &types.HostLocalSourceMark).
 			Action().GotoStage(binding.ConntrackStage).
@@ -2895,7 +2895,7 @@ func (c *featureEgress) externalFlows(category cookie.Category, exceptCIDRs []ne
 		//   - per-Node IPAM Pod is referred to as Pod.
 		//   - Remote Nodes' IPs are excluded by other flows.
 		//   - Egress is enabled.
-		// All traffic models are:
+		// Corresponding traffic models are:
 		//   01. Pod                         -- Egress [request]            --> External
 		//   02. Remote Pod(via Tunnel)      -- Egress [request]            --> External
 		L3ForwardingTable.ofTable.BuildFlow(priorityMiss).
@@ -3197,7 +3197,7 @@ func (c *featurePodConnectivity) l3FwdFlowToLocalCIDR(category cookie.Category) 
 		// The common conditions are:
 		//   - with NotRewriteMACRegMark (without RewriteMACRegMark).
 		//   - Pod / Antrea Pod is not in host network.
-		// All traffic models are:
+		// Corresponding traffic models are:
 		//   01. Pod                              -- Connect [request/reply]            --> Pod
 		//   02. Gateway                          -- Connect [request/reply]            --> Pod
 		//   03. External                         -- Egress  [reply]                    --> Pod
@@ -3236,7 +3236,7 @@ func (c *featurePodConnectivity) l3FwdFlowToNode(category cookie.Category) []bin
 			// The common conditions are:
 			//   - with RewriteMACRegMark。
 			//   - Pod / Antrea Pod is not in host network.
-			// All traffic models are:
+			// Corresponding traffic models are:
 			//   01. Pod                     -- Service [request]            --> Node(via Gateway)
 			//   02. Gateway                 -- Service [request][hairpin]   --> Node(via Gateway)
 			//   03. External(via Gateway)   -- Service [request][hairpin]   --> Node(via Gateway)
@@ -3273,7 +3273,7 @@ func (c *featurePodConnectivity) l3FwdFlowToNode(category cookie.Category) []bin
 				//   - Antrea IPAM Pod is referred to as Antrea Pod.
 				// The common condition is:
 				//   - Pod / Antrea Pod is not in host network.
-				// All traffic models are:
+				// Corresponding traffic models are:
 				//   01. Antrea Pod              -- Service [request]         --> Node(via Bridge)
 				//   02. Antrea Pod              -- Connect [request/reply]   --> Node(via Bridge)
 				L3ForwardingTable.ofTable.BuildFlow(priorityHigh).
@@ -3321,7 +3321,7 @@ func (c *featurePodConnectivity) l3FwdFlowToExternal(category cookie.Category) b
 	//   - Remote Nodes' IPs are regards as External.
 	// The common condition is:
 	//   - Pod / Antrea Pod is not in host network.
-	// All traffic models are:
+	// Corresponding traffic models are:
 	//   01. Pod            -- Connect [request]               --> External(via Gateway)
 	//   02. Pod            -- Connect [request][noEncap]      --> Remote Antrea Pod(via Uplink)
 	//   03. Antrea Pod     -- Connect [request][noEncap]      --> Remote Antrea Pod(via Uplink)
@@ -3371,7 +3371,7 @@ func (c *featureService) l3FwdFlowsToExternal(category cookie.Category) []bindin
 			//   - with RewriteMACRegMark.
 			//   - with NotAntreaFlexibleIPAMRegMark.
 			//   - Pod / Antrea Pod is not in host network.
-			// All traffic models are:
+			// Corresponding traffic models are:
 			//   01. Pod                        -- Service [request]              --> External(via Gateway)
 			//   02. Gateway                    -- Service [request][hairpin]     --> External(via Gateway)
 			//   03. Node(via Gateway)          -- Service [reply][hairpin]       --> External(via Gateway)
@@ -3394,7 +3394,7 @@ func (c *featureService) l3FwdFlowsToExternal(category cookie.Category) []bindin
 			//   - with RewriteMACRegMark.
 			//   - with AntreaFlexibleIPAMRegMark.
 			//   - Pod / Antrea Pod is not in host network.
-			// All traffic models are:
+			// Corresponding traffic models are:
 			//   01. Antrea Pod                 -- Service [request/reply]        --> Remote Antrea Pod(via Uplink)
 			//   02. Antrea Pod                 -- Service [request/reply]        --> External(via Uplink)
 			L3ForwardingTable.ofTable.BuildFlow(priorityLow).
@@ -3414,7 +3414,7 @@ func (c *featureService) l3FwdFlowsToExternal(category cookie.Category) []bindin
 			// The common conditions are:
 			//   - with RewriteMACRegMark.
 			//   - Pod / Antrea Pod is not in host network.
-			// All traffic models are:
+			// Corresponding traffic models are:
 			//   01. Pod                        -- Service [request]              --> External(via Gateway)
 			//   02. Gateway                    -- Service [request][hairpin]     --> External(via Gateway)
 			//   03. Node(via Gateway)          -- Service [reply][hairpin]       --> External(via Gateway)

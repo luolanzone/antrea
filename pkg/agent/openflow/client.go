@@ -507,7 +507,7 @@ func (c *client) InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP,
 	if c.networkConfig.TrafficEncapMode.IsNetworkPolicyOnly() {
 		// In policy-only mode, traffic to local Pod is routed based on destination IP.
 		flows = append(flows,
-			c.featureNetworkPolicy.l3FwdFlowRouteToPod(cookie.Pod, podInterfaceIPs, podInterfaceMAC)...,
+			c.featurePodConnectivity.l3FwdFlowRouteToPod(cookie.Pod, podInterfaceIPs, podInterfaceMAC)...,
 		)
 	}
 
@@ -694,7 +694,7 @@ func (c *client) InstallGatewayFlows() error {
 	}
 
 	// Add flow to ensure the liveness check packet could be forwarded correctly.
-	flows = append(flows, c.featureNetworkPolicy.localProbeFlow(cookie.Default, c.ovsDatapathType)...)
+	flows = append(flows, c.featurePodConnectivity.localProbeFlow(cookie.Default, c.ovsDatapathType)...)
 	flows = append(flows, c.featurePodConnectivity.l3FwdFlowToGateway(cookie.Default)...)
 
 	if err := c.ofEntryOperations.AddAll(flows); err != nil {
@@ -726,7 +726,7 @@ func (c *client) initialize() error {
 	if err := c.ofEntryOperations.AddAll(c.featureService.initialize(cookie.Default)); err != nil {
 		return fmt.Errorf("failed to install feature Service initial flows: %v", err)
 	}
-	if err := c.ofEntryOperations.AddAll(c.featureNetworkPolicy.initialize(cookie.Default, c.networkConfig.TrafficEncapMode.IsNetworkPolicyOnly())); err != nil {
+	if err := c.ofEntryOperations.AddAll(c.featureNetworkPolicy.initialize(cookie.Default)); err != nil {
 		return fmt.Errorf("failed to install feature NetworkPolicy initial flows: %v", err)
 	}
 	if c.ovsMetersAreSupported {

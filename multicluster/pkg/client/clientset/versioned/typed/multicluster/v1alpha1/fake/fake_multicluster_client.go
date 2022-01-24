@@ -55,6 +55,10 @@ func (c *FakeMulticlusterV1alpha1) ResourceImportFilters(namespace string) v1alp
 	return &FakeResourceImportFilters{c, namespace}
 }
 
+func (c *FakeMulticlusterV1alpha1) TunnelEndpoints(namespace string) v1alpha1.TunnelEndpointInterface {
+	return &FakeTunnelEndpoints{c, namespace}
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeMulticlusterV1alpha1) RESTClient() rest.Interface {

@@ -36,6 +36,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - services
   verbs:
   - create
@@ -223,6 +231,32 @@ rules:
   - multicluster.crd.antrea.io
   resources:
   - resourceimports/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints/status
   verbs:
   - get
   - patch
@@ -728,6 +762,30 @@ webhooks:
     resources:
     - resourceimports
   sideEffects: None
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      name: antrea-mc-webhook-service
+      namespace: changeme
+      path: /mutate-multicluster-crd-antrea-io-v1alpha1-tunnelendpoint
+  failurePolicy: Fail
+  name: mtunnelendpoint.kb.io
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: changeme
+  rules:
+  - apiGroups:
+    - multicluster.crd.antrea.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - tunnelendpoints
+  sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
@@ -832,6 +890,30 @@ webhooks:
     - UPDATE
     resources:
     - resourceimports
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      name: antrea-mc-webhook-service
+      namespace: changeme
+      path: /validate-multicluster-crd-antrea-io-v1alpha1-tunnelendpoint
+  failurePolicy: Fail
+  name: vtunnelendpoint.kb.io
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: changeme
+  rules:
+  - apiGroups:
+    - multicluster.crd.antrea.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - tunnelendpoints
   sideEffects: None
 - admissionReviewVersions:
   - v1

@@ -37,6 +37,8 @@ type Interface interface {
 	ResourceImports() ResourceImportInformer
 	// ResourceImportFilters returns a ResourceImportFilterInformer.
 	ResourceImportFilters() ResourceImportFilterInformer
+	// TunnelEndpoints returns a TunnelEndpointInformer.
+	TunnelEndpoints() TunnelEndpointInformer
 }
 
 type version struct {
@@ -83,4 +85,9 @@ func (v *version) ResourceImports() ResourceImportInformer {
 // ResourceImportFilters returns a ResourceImportFilterInformer.
 func (v *version) ResourceImportFilters() ResourceImportFilterInformer {
 	return &resourceImportFilterInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// TunnelEndpoints returns a TunnelEndpointInformer.
+func (v *version) TunnelEndpoints() TunnelEndpointInformer {
+	return &tunnelEndpointInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

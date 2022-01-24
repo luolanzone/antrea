@@ -17,6 +17,7 @@ import corev1 "k8s.io/api/core/v1"
 
 const (
 	AntreaMCServiceAnnotation = "multicluster.antrea.io/imported-service"
+	GatewayNodeAnnotation     = "multicluster.antrea.io/gateway"
 
 	AntreaMCSPrefix   = "antrea-mc-"
 	ServiceKind       = "Service"

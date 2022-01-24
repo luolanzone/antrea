@@ -32,6 +32,7 @@ type MulticlusterV1alpha1Interface interface {
 	ResourceExportFiltersGetter
 	ResourceImportsGetter
 	ResourceImportFiltersGetter
+	TunnelEndpointsGetter
 }
 
 // MulticlusterV1alpha1Client is used to interact with features provided by the multicluster.crd.antrea.io group.
@@ -65,6 +66,10 @@ func (c *MulticlusterV1alpha1Client) ResourceImports(namespace string) ResourceI
 
 func (c *MulticlusterV1alpha1Client) ResourceImportFilters(namespace string) ResourceImportFilterInterface {
 	return newResourceImportFilters(c, namespace)
+}
+
+func (c *MulticlusterV1alpha1Client) TunnelEndpoints(namespace string) TunnelEndpointInterface {
+	return newTunnelEndpoints(c, namespace)
 }
 
 // NewForConfig creates a new MulticlusterV1alpha1Client for the given config.

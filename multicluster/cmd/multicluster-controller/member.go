@@ -68,6 +68,15 @@ func runMember(o *Options) error {
 		return fmt.Errorf("error creating ServiceExport controller: %v", err)
 	}
 
+	gwNodeReconciler := multiclustercontrollers.NewGatewayNodeReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		env.GetPodNamespace(),
+		&clusterSetReconciler.RemoteCommonAreaManager)
+	if err = gwNodeReconciler.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("error creating Gateway Node controller: %v", err)
+	}
+
 	stopCh := signals.RegisterSignalHandlers()
 	staleController := multiclustercontrollers.NewStaleController(
 		mgr.GetClient(),

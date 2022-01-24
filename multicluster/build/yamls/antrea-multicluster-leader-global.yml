@@ -1289,3 +1289,95 @@ spec:
     storage: true
     subresources:
       status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.4.1
+  creationTimestamp: null
+  labels:
+    app: antrea
+  name: tunnelendpoints.multicluster.crd.antrea.io
+spec:
+  group: multicluster.crd.antrea.io
+  names:
+    kind: TunnelEndpoint
+    listKind: TunnelEndpointList
+    plural: tunnelendpoints
+    singular: tunnelendpoint
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: TunnelEndpoint is the Schema for the tunnelendpoints API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TunnelEndpointSpec defines the desired state of TunnelEndpoint
+            properties:
+              clusterID:
+                description: ClusterID of the member cluster.
+                type: string
+              hostname:
+                description: Hostname of Gateway node
+                type: string
+              privateIP:
+                description: PrivateIP of Gateway node
+                type: string
+              publicIP:
+                description: PublicIP of Gateway node
+                type: string
+              role:
+                description: Role (leader/member) shows the role of Gateway node if HA is enabled
+                type: string
+              subnets:
+                description: Subnets used by the member cluster.
+                items:
+                  type: string
+                type: array
+            type: object
+          status:
+            description: TunnelEndpointStatus defines the observed state of TunnelEndpoint
+            properties:
+              conditions:
+                items:
+                  description: TunnelEndpointCondition indicates the readiness condition of a TunnelEndpoint.
+                  properties:
+                    lastTransitionTime:
+                      description: Last time the condition transited from one status to another.
+                      format: date-time
+                      type: string
+                    message:
+                      description: A human readable message indicating details about the transition.
+                      type: string
+                    reason:
+                      description: Unique, one-word, CamelCase reason for the condition's last transition.
+                      type: string
+                    status:
+                      description: Status of the condition, one of True, False, Unknown.
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

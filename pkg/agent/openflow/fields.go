@@ -130,7 +130,7 @@ var (
 	// when needed.
 	EpUnionField = binding.NewRegField(4, 0, 18, "EndpointUnion")
 	// reg4[19]: Mark to indicate the Service type is NodePort.
-	ToNodePortAddressRegMark = binding.NewOneBitRegMark(0, 11, "NodePortAddress")
+	ToNodePortAddressRegMark = binding.NewOneBitRegMark(4, 19, "NodePortAddress")
 	// reg4[16..19]: Field to store the union value of Endpoint state and the mark of whether Service type is NodePort.
 	NodePortUnionField = binding.NewRegField(4, 16, 19, "NodePortUnion")
 	// reg4[20]: Field to indicate whether the packet is from local Antrea IPAM Pod. NotAntreaFlexibleIPAMRegMark will

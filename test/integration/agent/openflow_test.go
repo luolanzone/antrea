@@ -1033,7 +1033,7 @@ func preparePodFlows(podIPs []net.IP, podMAC net.HardwareAddr, podOFPort uint32,
 			[]*ofTestUtils.ExpectFlow{
 				{
 					MatchStr: fmt.Sprintf("priority=200,dl_dst=%s", podMAC.String()),
-					ActStr:   fmt.Sprintf("load:0x%x->NXM_NX_REG1[],load:0x1->NXM_NX_REG0[8],goto_table:IngressClassifier", podOFPort),
+					ActStr:   fmt.Sprintf("load:0x%x->NXM_NX_REG1[],load:0x1->NXM_NX_REG0[8],goto_table:IngressSecurityClassifier", podOFPort),
 				},
 			},
 		},
@@ -1081,7 +1081,7 @@ func preparePodFlows(podIPs []net.IP, podMAC net.HardwareAddr, podOFPort uint32,
 						},
 					},
 				})
-			nextTableForSpoofguard = "SNATConntrack"
+			nextTableForSpoofguard = "SNATConntrackZone"
 		} else {
 			ipProto = "ipv6"
 			nwSrcField = "ipv6_src"
@@ -1094,7 +1094,7 @@ func preparePodFlows(podIPs []net.IP, podMAC net.HardwareAddr, podOFPort uint32,
 				[]*ofTestUtils.ExpectFlow{
 					{
 						MatchStr: fmt.Sprintf("priority=200,%s,in_port=%d,dl_src=%s,%s=%s", ipProto, podOFPort, podMAC.String(), nwSrcField, podIP.String()),
-						ActStr:   fmt.Sprintf("goto_table:%s", nextTableForSpoofguard),
+						ActStr:   fmt.Sprintf("resubmit(,%s)", nextTableForSpoofguard),
 					},
 				},
 			},
@@ -1129,7 +1129,7 @@ func prepareGatewayFlows(gwIPs []net.IP, gwMAC net.HardwareAddr, vMAC net.Hardwa
 			[]*ofTestUtils.ExpectFlow{
 				{
 					MatchStr: fmt.Sprintf("priority=200,dl_dst=%s", gwMAC.String()),
-					ActStr:   fmt.Sprintf("load:0x%x->NXM_NX_REG1[],load:0x1->NXM_NX_REG0[8],goto_table:IngressClassifier", config1.HostGatewayOFPort),
+					ActStr:   fmt.Sprintf("load:0x%x->NXM_NX_REG1[],load:0x1->NXM_NX_REG0[8],goto_table:IngressSecurityClassifier", config1.HostGatewayOFPort),
 				},
 			},
 		},
@@ -1147,7 +1147,7 @@ func prepareGatewayFlows(gwIPs []net.IP, gwMAC net.HardwareAddr, vMAC net.Hardwa
 					[]*ofTestUtils.ExpectFlow{
 						{
 							MatchStr: fmt.Sprintf("priority=200,ip,in_port=%d", config1.HostGatewayOFPort),
-							ActStr:   "goto_table:SNATConntrackZone",
+							ActStr:   "resubmit(,SNATConntrackZone)",
 						},
 					},
 				},
@@ -1174,7 +1174,7 @@ func prepareGatewayFlows(gwIPs []net.IP, gwMAC net.HardwareAddr, vMAC net.Hardwa
 		}
 		flows = append(flows,
 			expectTableFlows{
-				tableName: "IngressClassifier",
+				tableName: "IngressSecurityClassifier",
 				flows: []*ofTestUtils.ExpectFlow{
 					{
 						MatchStr: fmt.Sprintf("priority=210,%s,%s=%s", ipProtoStr, nwSrcStr, gwIP.String()),
@@ -1221,7 +1221,7 @@ func prepareTunnelFlows(tunnelPort uint32, vMAC net.HardwareAddr) []expectTableF
 			[]*ofTestUtils.ExpectFlow{
 				{
 					MatchStr: fmt.Sprintf("priority=200,dl_dst=%s", vMAC.String()),
-					ActStr:   fmt.Sprintf("load:0x%x->NXM_NX_REG1[],load:0x1->NXM_NX_REG0[8],goto_table:IngressClassifier", config1.DefaultTunOFPort),
+					ActStr:   fmt.Sprintf("load:0x%x->NXM_NX_REG1[],load:0x1->NXM_NX_REG0[8],goto_table:IngressSecurityClassifier", config1.DefaultTunOFPort),
 				},
 			},
 		},
@@ -1291,7 +1291,7 @@ func prepareDefaultFlows(config *testConfig) []expectTableFlows {
 	}
 	tableConntrackStateFlows := expectTableFlows{
 		tableName: "ConntrackState",
-		flows:     []*ofTestUtils.ExpectFlow{{MatchStr: "priority=0", ActStr: "resubmit(,SessionAffinity),resubmit(,ServiceLB)"}},
+		flows:     []*ofTestUtils.ExpectFlow{{MatchStr: "priority=0", ActStr: "drop"}},
 	}
 	tableConntrackCommitFlows := expectTableFlows{
 		tableName: "ConntrackCommit",
@@ -1332,6 +1332,7 @@ func prepareDefaultFlows(config *testConfig) []expectTableFlows {
 			&ofTestUtils.ExpectFlow{MatchStr: "priority=200,ip", ActStr: "ct(table=ConntrackState,zone=65520,nat)"},
 		)
 		tableConntrackStateFlows.flows = append(tableConntrackStateFlows.flows,
+			&ofTestUtils.ExpectFlow{MatchStr: "priority=190,ct_state=+new+trk,ip", ActStr: "goto_table:PreRoutingClassifier"},
 			&ofTestUtils.ExpectFlow{MatchStr: "priority=190,ct_state=+inv+trk,ip", ActStr: "drop"},
 		)
 		tableConntrackCommitFlows.flows = append(tableConntrackCommitFlows.flows,
@@ -1391,6 +1392,7 @@ func prepareDefaultFlows(config *testConfig) []expectTableFlows {
 			&ofTestUtils.ExpectFlow{MatchStr: "priority=200,ipv6", ActStr: "ct(table=ConntrackState,zone=65510,nat)"},
 		)
 		tableConntrackStateFlows.flows = append(tableConntrackStateFlows.flows,
+			&ofTestUtils.ExpectFlow{MatchStr: "priority=190,ct_state=+new+trk,ipv6", ActStr: "goto_table:PreRoutingClassifier"},
 			&ofTestUtils.ExpectFlow{MatchStr: "priority=190,ct_state=+inv+trk,ipv6", ActStr: "drop"},
 		)
 		tableConntrackCommitFlows.flows = append(tableConntrackCommitFlows.flows,
@@ -1486,10 +1488,10 @@ func prepareDefaultFlows(config *testConfig) []expectTableFlows {
 		},
 		{
 			"L2Forwarding",
-			[]*ofTestUtils.ExpectFlow{{MatchStr: "priority=0", ActStr: "goto_table:IngressClassifier"}},
+			[]*ofTestUtils.ExpectFlow{{MatchStr: "priority=0", ActStr: "goto_table:IngressSecurityClassifier"}},
 		},
 		{
-			"IngressClassifier",
+			"IngressSecurityClassifier",
 			[]*ofTestUtils.ExpectFlow{{MatchStr: "priority=0", ActStr: "goto_table:IngressMetric"}},
 		},
 		{

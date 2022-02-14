@@ -795,16 +795,15 @@ func (c *client) Initialize(roundInfo types.RoundInfo, nodeConfig *config.NodeCo
 
 func (c *client) initializeFeatures() map[pipeline][]*featureTemplate {
 	var features []feature
-	podConnectivityIP := newFeaturePodConnectivity(c.cookieAllocator,
+	c.featurePodConnectivity = newFeaturePodConnectivity(c.cookieAllocator,
 		c.ipProtocols,
 		c.nodeConfig,
 		c.networkConfig,
 		c.connectUplinkToBridge,
 		c.enableMulticast)
-	c.featurePodConnectivity = podConnectivityIP
-	features = append(features, podConnectivityIP)
+	features = append(features, c.featurePodConnectivity)
 
-	networkPolicy := newFeatureNetworkPolicy(c.cookieAllocator,
+	c.featureNetworkPolicy = newFeatureNetworkPolicy(c.cookieAllocator,
 		c.ipProtocols,
 		c.bridge,
 		c.nodeConfig,
@@ -812,39 +811,34 @@ func (c *client) initializeFeatures() map[pipeline][]*featureTemplate {
 		c.ovsMetersAreSupported,
 		c.enableDenyTracking,
 		c.enableAntreaPolicy)
-	c.featureNetworkPolicy = networkPolicy
-	features = append(features, networkPolicy)
+	features = append(features, c.featureNetworkPolicy)
 
-	service := newFeatureService(c.cookieAllocator,
+	c.featureService = newFeatureService(c.cookieAllocator,
 		c.ipProtocols,
 		c.nodeConfig,
 		c.bridge,
 		c.enableProxy,
 		c.proxyAll,
 		c.connectUplinkToBridge)
-	c.featureService = service
-	features = append(features, service)
+	features = append(features, c.featureService)
 
 	if c.enableEgress {
-		egress := newFeatureEgress(c.cookieAllocator, c.ipProtocols, c.nodeConfig.GatewayConfig.MAC)
-		c.featureEgress = egress
-		features = append(features, egress)
+		c.featureEgress = newFeatureEgress(c.cookieAllocator, c.ipProtocols, c.nodeConfig.GatewayConfig.MAC)
+		features = append(features, c.featureEgress)
 	}
 
-	traceflow := newFeatureTraceflow(c.cookieAllocator,
+	c.featureTraceflow = newFeatureTraceflow(c.cookieAllocator,
 		c.ipProtocols,
 		c.ovsDatapathType,
 		c.nodeConfig,
 		c.enableProxy,
 		c.enableAntreaPolicy,
 		c.networkConfig.TrafficEncapMode.SupportsEncap())
-	c.featureTraceflow = traceflow
 
 	if c.enableMulticast {
 		// TODO: add support for IPv6 protocol
-		mcast := newFeatureMulticast(c.cookieAllocator, []binding.Protocol{binding.ProtocolIP})
-		c.featureMulticast = mcast
-		features = append(features, mcast)
+		c.featureMulticast = newFeatureMulticast(c.cookieAllocator, []binding.Protocol{binding.ProtocolIP})
+		features = append(features, c.featureMulticast)
 	}
 	c.activeFeatures = features
 
@@ -916,13 +910,13 @@ func (c *client) ReplayFlows() {
 		klog.Errorf("Error during flow replay: %v", err)
 	}
 
+	c.featureService.replayGroups()
+
 	for _, activeFeature := range c.activeFeatures {
 		if err := c.ofEntryOperations.AddAll(activeFeature.replayFlows()); err != nil {
 			klog.Errorf("Error when replaying feature %v flows: %v", activeFeature.getFeatureName(), err)
 		}
 	}
-
-	c.featureService.replayGroups()
 }
 
 func (c *client) deleteFlowsByRoundNum(roundNum uint64) error {

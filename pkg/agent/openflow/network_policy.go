@@ -1722,9 +1722,8 @@ type featureNetworkPolicy struct {
 	conjMatchFlowLock        sync.Mutex // Lock for access globalConjMatchFlowCache
 	// policyCache is a storage that supports listing policyRuleConjunction with different indexers.
 	// It's guaranteed that one policyRuleConjunction is processed by at most one goroutine at any given time.
-	policyCache       cache.Indexer
-	flowCategoryCache *flowCategoryCache
-	packetInHandlers  map[uint8]map[string]PacketInHandler
+	policyCache      cache.Indexer
+	packetInHandlers map[uint8]map[string]PacketInHandler
 
 	gatewayIPs map[binding.Protocol]net.IP
 
@@ -1763,7 +1762,6 @@ func newFeatureNetworkPolicy(
 		cookieAllocator:          cookieAllocator,
 		ipProtocols:              ipProtocols,
 		bridge:                   bridge,
-		flowCategoryCache:        newFlowCategoryCache(),
 		globalConjMatchFlowCache: make(map[string]*conjMatchFlowContext),
 		packetInHandlers:         map[uint8]map[string]PacketInHandler{},
 		policyCache:              cache.NewIndexer(policyConjKeyFunc, cache.Indexers{priorityIndex: priorityIndexFunc}),

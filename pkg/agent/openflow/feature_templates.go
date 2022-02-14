@@ -267,7 +267,7 @@ func (c *featureNetworkPolicy) getTemplate(p pipeline) *featureTemplate {
 				EgressMetricTable,
 			},
 			binding.IngressSecurityStage: {
-				IngressClassifierTable,
+				IngressSecurityClassifierTable,
 				IngressRuleTable,
 				IngressDefaultTable,
 				IngressMetricTable,
@@ -293,6 +293,7 @@ func (c *featureService) getTemplate(p pipeline) *featureTemplate {
 					SNATConntrackTable,
 				},
 				binding.PreRoutingStage: {
+					PreRoutingClassifierTable,
 					SessionAffinityTable,
 					ServiceLBTable,
 					EndpointDNATTable,

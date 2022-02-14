@@ -464,13 +464,13 @@ func (c *client) InstallNodeFlows(hostname string,
 		}
 	}
 	if ipsecTunOFPort != 0 {
-		// When IPSec tunnel is enabled, packets received from the remote Node are
-		// input from the Node's IPSec tunnel port, not the default tunnel port. So,
-		// add a separate tunnelClassifierFlow for the IPSec tunnel port.
+		// When IPsec tunnel is enabled, packets received from the remote Node are
+		// input from the Node's IPsec tunnel port, not the default tunnel port. So,
+		// add a separate tunnelClassifierFlow for the IPsec tunnel port.
 		flows = append(flows, c.featurePodConnectivity.tunnelClassifierFlow(cookie.Node, ipsecTunOFPort))
 	}
 
-	// For Windows Noencap Mode, the OVS flows for Node need be be exactly same as the provided 'flows' slice because
+	// For Windows Noencap Mode, the OVS flows for Node need to be exactly same as the provided 'flows' slice because
 	// the Node flows may be processed more than once if the MAC annotation is updated.
 	return c.modifyFlows(c.featurePodConnectivity.nodeFlowCache, hostname, flows)
 }
@@ -720,15 +720,13 @@ func (c *client) initialize() error {
 	if err := c.ofEntryOperations.AddAll(c.defaultFlows(cookie.Default)); err != nil {
 		return fmt.Errorf("failed to install default flows: %v", err)
 	}
-	if err := c.ofEntryOperations.AddAll(c.featurePodConnectivity.initialize(cookie.Default)); err != nil {
-		return fmt.Errorf("failed to install feature PodConnectivity initial flows: %v", err)
+
+	for _, activeFeature := range c.activeFeatures {
+		if err := c.ofEntryOperations.AddAll(activeFeature.initFlows(cookie.Default)); err != nil {
+			return fmt.Errorf("failed to install feature %v initial flows: %v", activeFeature.getFeatureName(), err)
+		}
 	}
-	if err := c.ofEntryOperations.AddAll(c.featureService.initialize(cookie.Default)); err != nil {
-		return fmt.Errorf("failed to install feature Service initial flows: %v", err)
-	}
-	if err := c.ofEntryOperations.AddAll(c.featureNetworkPolicy.initialize(cookie.Default)); err != nil {
-		return fmt.Errorf("failed to install feature NetworkPolicy initial flows: %v", err)
-	}
+
 	if c.ovsMetersAreSupported {
 		if err := c.genPacketInMeter(PacketInMeterIDNP, PacketInMeterRateNP).Add(); err != nil {
 			return fmt.Errorf("failed to install OpenFlow meter entry (meterID:%d, rate:%d) for NetworkPolicy packet-in rate limiting: %v", PacketInMeterIDNP, PacketInMeterRateNP, err)
@@ -848,6 +846,7 @@ func (c *client) initializeFeatures() map[pipeline][]*featureTemplate {
 		c.featureMulticast = mcast
 		features = append(features, mcast)
 	}
+	c.activeFeatures = features
 
 	templatesMap := make(map[pipeline][]*featureTemplate)
 	for _, f := range features {
@@ -874,7 +873,7 @@ func (c *client) InstallExternalFlows(exceptCIDRs []net.IPNet) error {
 		if err := c.ofEntryOperations.AddAll(flows); err != nil {
 			return fmt.Errorf("failed to install flows for external communication: %v", err)
 		}
-		c.featureEgress.hostNetworkingFlows = append(c.featureEgress.hostNetworkingFlows, flows...)
+		c.featureEgress.exceptCIDRFlows = append(c.featureEgress.exceptCIDRFlows, flows...)
 	}
 	return nil
 }
@@ -917,57 +916,13 @@ func (c *client) ReplayFlows() {
 		klog.Errorf("Error during flow replay: %v", err)
 	}
 
-	addFixedFlows := func(flows []binding.Flow) {
-		for _, flow := range flows {
-			flow.Reset()
-		}
-		if err := c.ofEntryOperations.AddAll(flows); err != nil {
-			klog.Errorf("Error when replaying fixed flows: %v", err)
+	for _, activeFeature := range c.activeFeatures {
+		if err := c.ofEntryOperations.AddAll(activeFeature.replayFlows()); err != nil {
+			klog.Errorf("Error when replaying feature %v flows: %v", activeFeature.getFeatureName(), err)
 		}
 	}
 
-	addFixedFlows(c.featurePodConnectivity.gatewayFlows)
-	addFixedFlows(c.featurePodConnectivity.defaultTunnelFlows)
-	addFixedFlows(c.featurePodConnectivity.hostNetworkingFlows)
-	addFixedFlows(c.featureService.defaultServiceFlows)
-	if c.featureEgress != nil && len(c.featureEgress.hostNetworkingFlows) > 0 {
-		addFixedFlows(c.featureEgress.hostNetworkingFlows)
-	}
-
-	installCachedFlows := func(key, value interface{}) bool {
-		fCache := value.(flowCache)
-		cachedFlows := make([]binding.Flow, 0)
-
-		for _, flow := range fCache {
-			flow.Reset()
-			cachedFlows = append(cachedFlows, flow)
-		}
-
-		if err := c.ofEntryOperations.AddAll(cachedFlows); err != nil {
-			klog.Errorf("Error when replaying cached flows: %v", err)
-		}
-		return true
-	}
-
-	c.featureService.groupCache.Range(func(id, value interface{}) bool {
-		group := value.(binding.Group)
-		group.Reset()
-		if err := group.Add(); err != nil {
-			klog.Errorf("Error when replaying cached group %d: %v", id, err)
-		}
-		return true
-	})
-	c.featurePodConnectivity.nodeFlowCache.Range(installCachedFlows)
-	c.featurePodConnectivity.podFlowCache.Range(installCachedFlows)
-	c.featureService.serviceFlowCache.Range(installCachedFlows)
-
-	if err := c.ofEntryOperations.AddAll(c.featureNetworkPolicy.replayPolicyFlows()); err != nil {
-		klog.Errorf("Error when replaying flows: %v", err)
-	}
-
-	if c.enableMulticast {
-		c.featureMulticast.mcastFlowCache.Range(installCachedFlows)
-	}
+	c.featureService.replayGroups()
 }
 
 func (c *client) deleteFlowsByRoundNum(roundNum uint64) error {

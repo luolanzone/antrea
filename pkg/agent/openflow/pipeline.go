@@ -286,8 +286,6 @@ var (
 	snatPktMarkRange = &binding.Range{0, 7}
 
 	GlobalVirtualMAC, _ = net.ParseMAC("aa:bb:cc:dd:ee:ff")
-
-	_, mcastCIDR, _ = net.ParseCIDR("224.0.0.0/4")
 )
 
 type OFEntryOperations interface {
@@ -335,6 +333,7 @@ type client struct {
 	featureNetworkPolicy   *featureNetworkPolicy
 	featureMulticast       *featureMulticast
 	featureTraceflow       *featureTraceflow
+	activeFeatures         []feature
 
 	pipelines   map[pipeline]binding.Pipeline
 	ipProtocols []binding.Protocol

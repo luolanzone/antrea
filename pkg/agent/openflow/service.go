@@ -18,6 +18,8 @@ import (
 	"net"
 	"sync"
 
+	"k8s.io/klog/v2"
+
 	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/openflow/cookie"
 	binding "antrea.io/antrea/pkg/ovs/openflow"
@@ -43,7 +45,7 @@ type featureService struct {
 	connectUplinkToBridge bool
 }
 
-func (c *featureService) getFeatureID() featureID {
+func (c *featureService) getFeatureName() featureName {
 	return Service
 }
 
@@ -90,7 +92,7 @@ func newFeatureService(
 	}
 }
 
-func (c *featureService) initialize(category cookie.Category) []binding.Flow {
+func (c *featureService) initFlows(category cookie.Category) []binding.Flow {
 	var flows []binding.Flow
 	if c.enableProxy {
 		flows = append(flows, c.conntrackFlows(category)...)
@@ -100,4 +102,38 @@ func (c *featureService) initialize(category cookie.Category) []binding.Flow {
 		flows = append(flows, c.gatewayHairpinFlows(category)...)
 	}
 	return flows
+}
+
+func (c *featureService) replayFlows() []binding.Flow {
+	var flows []binding.Flow
+
+	// Get fixed flows.
+	for _, flow := range c.defaultServiceFlows {
+		flow.Reset()
+		flows = append(flows, flow)
+	}
+
+	// Get cached flows.
+	rangeFunc := func(key, value interface{}) bool {
+		fCache := value.(flowCache)
+		for _, flow := range fCache {
+			flow.Reset()
+			flows = append(flows, flow)
+		}
+		return true
+	}
+	c.serviceFlowCache.Range(rangeFunc)
+
+	return flows
+}
+
+func (c *featureService) replayGroups() {
+	c.groupCache.Range(func(id, value interface{}) bool {
+		group := value.(binding.Group)
+		group.Reset()
+		if err := group.Add(); err != nil {
+			klog.Errorf("Error when replaying cached group %d: %v", id, err)
+		}
+		return true
+	})
 }

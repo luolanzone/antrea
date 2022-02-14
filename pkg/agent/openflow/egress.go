@@ -25,13 +25,13 @@ type featureEgress struct {
 	cookieAllocator cookie.Allocator
 	ipProtocols     []binding.Protocol
 
-	snatFlowCache       *flowCategoryCache
-	hostNetworkingFlows []binding.Flow
+	snatFlowCache   *flowCategoryCache
+	exceptCIDRFlows []binding.Flow
 
 	gatewayMAC net.HardwareAddr
 }
 
-func (c *featureEgress) getFeatureID() featureID {
+func (c *featureEgress) getFeatureName() featureName {
 	return Egress
 }
 
@@ -44,4 +44,31 @@ func newFeatureEgress(cookieAllocator cookie.Allocator,
 		ipProtocols:     ipProtocols,
 		gatewayMAC:      gatewayMAC,
 	}
+}
+
+func (c *featureEgress) initFlows(category cookie.Category) []binding.Flow {
+	return []binding.Flow{}
+}
+
+func (c *featureEgress) replayFlows() []binding.Flow {
+	var flows []binding.Flow
+
+	// Get fixed flows.
+	for _, flow := range c.exceptCIDRFlows {
+		flow.Reset()
+		flows = append(flows, flow)
+	}
+
+	// Get cached flows.
+	rangeFunc := func(key, value interface{}) bool {
+		fCache := value.(flowCache)
+		for _, flow := range fCache {
+			flow.Reset()
+			flows = append(flows, flow)
+		}
+		return true
+	}
+	c.snatFlowCache.Range(rangeFunc)
+
+	return flows
 }

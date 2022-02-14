@@ -36,7 +36,7 @@ type featureTraceflow struct {
 	supportEncap          bool
 }
 
-func (c *featureTraceflow) getFeatureID() featureID {
+func (c *featureTraceflow) getFeatureName() featureName {
 	return Traceflow
 }
 
@@ -66,4 +66,12 @@ func newFeatureTraceflow(cookieAllocator cookie.Allocator,
 		enableAntreaPolicy:    enableAntreaPolicy,
 		supportEncap:          supportEncap,
 	}
+}
+
+func (c *featureTraceflow) initFlows(category cookie.Category) []binding.Flow {
+	return []binding.Flow{}
+}
+
+func (c *featureTraceflow) replayFlows() []binding.Flow {
+	return []binding.Flow{}
 }

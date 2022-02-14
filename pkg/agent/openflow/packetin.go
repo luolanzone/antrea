@@ -1,4 +1,4 @@
-// Copyright 2021 Antrea Authors
+// Copyright 2020 Antrea Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 	"golang.org/x/time/rate"
 	"k8s.io/klog/v2"
 
-	binding "antrea.io/antrea/pkg/ovs/openflow"
+	"antrea.io/antrea/pkg/ovs/openflow"
 )
 
 type ofpPacketInReason uint8
@@ -73,12 +73,12 @@ func (c *client) RegisterPacketInHandler(packetHandlerReason uint8, packetHandle
 type featureStartPacketIn struct {
 	reason        uint8
 	stopCh        <-chan struct{}
-	packetInQueue *binding.PacketInQueue
+	packetInQueue *openflow.PacketInQueue
 }
 
 func newfeatureStartPacketIn(reason uint8, stopCh <-chan struct{}) *featureStartPacketIn {
 	featurePacketIn := featureStartPacketIn{reason: reason, stopCh: stopCh}
-	featurePacketIn.packetInQueue = binding.NewPacketInQueue(PacketInQueueSize, rate.Limit(PacketInQueueRate))
+	featurePacketIn.packetInQueue = openflow.NewPacketInQueue(PacketInQueueSize, rate.Limit(PacketInQueueRate))
 
 	return &featurePacketIn
 }

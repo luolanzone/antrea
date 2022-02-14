@@ -1363,7 +1363,7 @@ func (c *featureNetworkPolicy) getStalePriorities(conj *policyRuleConjunction) (
 	return staleOFPriorities
 }
 
-func (c *featureNetworkPolicy) replayPolicyFlows() []binding.Flow {
+func (c *featureNetworkPolicy) replayFlows() []binding.Flow {
 	var flows []binding.Flow
 	addActionFlows := func(conj *policyRuleConjunction) {
 		for _, flow := range conj.actionFlows {
@@ -1456,7 +1456,7 @@ func (c *client) DeletePolicyRuleAddress(ruleID uint32, addrType types.AddressTy
 func (c *client) GetNetworkPolicyFlowKeys(npName, npNamespace string) []string {
 	flowKeys := []string{}
 	// Hold replayMutex write lock to protect flows from being modified by
-	// NetworkPolicy updates and replayPolicyFlows. This is more for logic
+	// NetworkPolicy updates and replayFlows. This is more for logic
 	// cleanliness, as: for now flow updates do not impact the matching string
 	// generation; NetworkPolicy updates do not change policyRuleConjunction.actionFlows;
 	// and last for protection of clause flows, conjMatchFlowLock is good enough.
@@ -1738,7 +1738,7 @@ type featureNetworkPolicy struct {
 	deterministic bool
 }
 
-func (c *featureNetworkPolicy) getFeatureID() featureID {
+func (c *featureNetworkPolicy) getFeatureName() featureName {
 	return NetworkPolicy
 }
 
@@ -1775,7 +1775,7 @@ func newFeatureNetworkPolicy(
 	}
 }
 
-func (c *featureNetworkPolicy) initialize(category cookie.Category) []binding.Flow {
+func (c *featureNetworkPolicy) initFlows(category cookie.Category) []binding.Flow {
 	egressTables = map[uint8]struct{}{
 		EgressRuleTable.GetID():    {},
 		EgressDefaultTable.GetID(): {},

@@ -15,9 +15,13 @@
 package openflow
 
 import (
+	"net"
+
 	"antrea.io/antrea/pkg/agent/openflow/cookie"
 	binding "antrea.io/antrea/pkg/ovs/openflow"
 )
+
+var _, mcastCIDR, _ = net.ParseCIDR("224.0.0.0/4")
 
 type featureMulticast struct {
 	cookieAllocator cookie.Allocator
@@ -25,7 +29,7 @@ type featureMulticast struct {
 	mcastFlowCache  *flowCategoryCache
 }
 
-func (c *featureMulticast) getFeatureID() featureID {
+func (c *featureMulticast) getFeatureName() featureName {
 	return Multicast
 }
 
@@ -45,4 +49,25 @@ func multicastPipelineClassifyFlow(cookieID uint64, pipeline binding.Pipeline) b
 		MatchDstIPNet(*mcastCIDR).
 		Action().ResubmitToTables(targetTable.GetID()).
 		Done()
+}
+
+func (c *featureMulticast) initFlows(category cookie.Category) []binding.Flow {
+	return []binding.Flow{}
+}
+
+func (c *featureMulticast) replayFlows() []binding.Flow {
+	var flows []binding.Flow
+
+	// Get cached flows.
+	rangeFunc := func(key, value interface{}) bool {
+		fCache := value.(flowCache)
+		for _, flow := range fCache {
+			flow.Reset()
+			flows = append(flows, flow)
+		}
+		return true
+	}
+	c.mcastFlowCache.Range(rangeFunc)
+
+	return flows
 }

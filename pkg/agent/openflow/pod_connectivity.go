@@ -43,7 +43,7 @@ type featurePodConnectivity struct {
 	enableMulticast       bool
 }
 
-func (c *featurePodConnectivity) getFeatureID() featureID {
+func (c *featurePodConnectivity) getFeatureName() featureName {
 	return PodConnectivity
 }
 
@@ -88,7 +88,7 @@ func newFeaturePodConnectivity(
 	}
 }
 
-func (c *featurePodConnectivity) initialize(category cookie.Category) []binding.Flow {
+func (c *featurePodConnectivity) initFlows(category cookie.Category) []binding.Flow {
 	var flows []binding.Flow
 
 	for _, ipProtocol := range c.ipProtocols {
@@ -112,5 +112,32 @@ func (c *featurePodConnectivity) initialize(category cookie.Category) []binding.
 		// Replies any ARP request with the same global virtual MAC.
 		flows = append(flows, c.arpResponderStaticFlow(category))
 	}
+	return flows
+}
+
+func (c *featurePodConnectivity) replayFlows() []binding.Flow {
+	var flows []binding.Flow
+
+	// Get fixed flows.
+	for _, defaultFlows := range [][]binding.Flow{c.defaultTunnelFlows, c.gatewayFlows, c.hostNetworkingFlows} {
+		for _, flow := range defaultFlows {
+			flow.Reset()
+			flows = append(flows, flow)
+		}
+	}
+
+	// Get cached flows.
+	rangeFunc := func(key, value interface{}) bool {
+		fCache := value.(flowCache)
+		for _, flow := range fCache {
+			flow.Reset()
+			flows = append(flows, flow)
+		}
+		return true
+	}
+	for _, cachedFlows := range []*flowCategoryCache{c.nodeFlowCache, c.podFlowCache} {
+		cachedFlows.Range(rangeFunc)
+	}
+
 	return flows
 }

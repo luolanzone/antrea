@@ -15,6 +15,7 @@
 package openflow
 
 import (
+	"antrea.io/antrea/pkg/agent/openflow/cookie"
 	binding "antrea.io/antrea/pkg/ovs/openflow"
 	"antrea.io/antrea/pkg/util/runtime"
 )
@@ -103,31 +104,35 @@ type FeatureTable struct {
 	ofTable  binding.Table
 }
 
-type featureID int
+type featureName string
 
 const (
-	PodConnectivity featureID = iota
-	NetworkPolicy
-	Service
-	Egress
-	Traceflow
-	Multicast
+	PodConnectivity featureName = "PodConnectivity"
+	NetworkPolicy   featureName = "NetworkPolicy"
+	Service         featureName = "Service"
+	Egress          featureName = "Egress"
+	Traceflow       featureName = "Traceflow"
+	Multicast       featureName = "Multicast"
 )
 
 // featureTemplate is a map to store which Stages and FeatureTables will be used for a Feature.
 type featureTemplate struct {
 	stageTables map[binding.StageID][]*FeatureTable
-	feature     featureID
+	feature     featureName
 }
 
 // feature is just the concept of Feature in framework Flexible Pipeline.
 type feature interface {
-	// getFeatureID gets the ID of a Feature.
-	getFeatureID() featureID
+	// getFeatureName gets the name of a Feature.
+	getFeatureName() featureName
 	// getTemplate gets featureTemplate. For a Feature, it can participate in build more than one Pipeline. In another
 	// word, a Feature may have multiple Pipelines. For example, when IPv4 is enabled, Feature PodConnectivity needs
 	// both Pipeline for IP and Pipeline for ARP.
 	getTemplate(p pipeline) *featureTemplate
+	// initFlows gets initialized flows.
+	initFlows(category cookie.Category) []binding.Flow
+	// replayFlows gets fixed and cached flows.
+	replayFlows() []binding.Flow
 }
 
 // pipeline is just the concept of Pipeline in Flexible Pipeline.

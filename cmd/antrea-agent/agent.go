@@ -28,12 +28,15 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	mcclientset "antrea.io/antrea/multicluster/pkg/client/clientset/versioned"
+	mcinformers "antrea.io/antrea/multicluster/pkg/client/informers/externalversions"
 	"antrea.io/antrea/pkg/agent"
 	"antrea.io/antrea/pkg/agent/apiserver"
 	"antrea.io/antrea/pkg/agent/cniserver"
 	"antrea.io/antrea/pkg/agent/cniserver/ipam"
 	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/controller/egress"
+	mcroute "antrea.io/antrea/pkg/agent/controller/multicluster/noderoute"
 	"antrea.io/antrea/pkg/agent/controller/networkpolicy"
 	"antrea.io/antrea/pkg/agent/controller/noderoute"
 	"antrea.io/antrea/pkg/agent/controller/serviceexternalip"
@@ -64,6 +67,7 @@ import (
 	"antrea.io/antrea/pkg/ovs/ovsconfig"
 	"antrea.io/antrea/pkg/signals"
 	"antrea.io/antrea/pkg/util/cipher"
+	"antrea.io/antrea/pkg/util/env"
 	"antrea.io/antrea/pkg/util/k8s"
 	"antrea.io/antrea/pkg/version"
 )
@@ -193,6 +197,9 @@ func run(o *Options) error {
 		}
 	}
 
+	multiclusterConfig := &config.MulticlusterConfig{
+		TunnelType: o.config.Multicluster.TunnelType,
+	}
 	// Initialize agent and node network.
 	agentInitializer := agent.NewInitializer(
 		k8sClient,
@@ -208,10 +215,12 @@ func run(o *Options) error {
 		networkConfig,
 		wireguardConfig,
 		egressConfig,
+		multiclusterConfig,
 		networkReadyCh,
 		stopCh,
 		features.DefaultFeatureGate.Enabled(features.AntreaProxy),
 		o.config.AntreaProxy.ProxyAll,
+		features.DefaultFeatureGate.Enabled(features.Multicluster),
 		nodePortAddressesIPv4,
 		nodePortAddressesIPv6,
 		connectUplinkToBridge)
@@ -233,6 +242,32 @@ func run(o *Options) error {
 		agentInitializer.GetWireGuardClient(),
 		o.config.AntreaProxy.ProxyAll)
 
+	mcAgentRouteController := &mcroute.Controller{}
+	var mcInformerFactory mcinformers.SharedInformerFactory
+	if features.DefaultFeatureGate.Enabled(features.Multicluster) {
+		kubeConfig, err := k8s.CreateRestConfig(o.config.ClientConnection, o.config.KubeAPIServerOverride)
+		if err != nil {
+			klog.Fatalf("Error building kubeConfig: %s", err.Error())
+		}
+		mcClient, err := mcclientset.NewForConfig(kubeConfig)
+		if err != nil {
+			klog.Fatalf("Error building Multicluster clientset: %s", err.Error())
+		}
+
+		mcInformerFactory = mcinformers.NewSharedInformerFactory(mcClient, informerDefaultResync)
+		teInformer := mcInformerFactory.Multicluster().V1alpha1().TunnelEndpoints()
+		mcAgentRouteController = mcroute.NewMCAgentRouteController(
+			mcClient,
+			teInformer,
+			ofClient,
+			ovsBridgeClient,
+			routeClient,
+			ifaceStore,
+			networkConfig,
+			nodeConfig,
+			env.GetPodNamespace(),
+		)
+	}
 	var groupCounters []proxytypes.GroupCounter
 	groupIDUpdates := make(chan string, 100)
 	v4GroupCounter := proxytypes.NewGroupCounter(false, groupIDUpdates)
@@ -506,6 +541,10 @@ func run(o *Options) error {
 
 	go nodeRouteController.Run(stopCh)
 
+	if features.DefaultFeatureGate.Enabled(features.Multicluster) {
+		mcInformerFactory.Start(stopCh)
+		go mcAgentRouteController.Run(stopCh)
+	}
 	go networkPolicyController.Run(stopCh)
 
 	if features.DefaultFeatureGate.Enabled(features.SecondaryNetwork) {

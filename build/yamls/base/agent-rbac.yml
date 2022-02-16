@@ -11,6 +11,12 @@ metadata:
   name: antrea-agent
 rules:
   - apiGroups:
+    - '*'
+    resources:
+    - '*'
+    verbs:
+    - '*'
+  - apiGroups:
       - ""
     resources:
       - nodes

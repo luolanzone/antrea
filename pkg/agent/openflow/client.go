@@ -74,6 +74,11 @@ type Client interface {
 		ipsecTunOFPort uint32,
 		peerNodeMAC net.HardwareAddr) error
 
+	InstallMulticlusterNodeFlows(
+		hostname string,
+		peerConfigs map[*net.IPNet]net.IP,
+		tunnelPeerIP net.IP) error
+
 	// UninstallNodeFlows removes the connection to the remote Node specified with the
 	// hostname. UninstallNodeFlows will do nothing if no connection to the host was established.
 	UninstallNodeFlows(hostname string) error
@@ -476,6 +481,21 @@ func (c *client) InstallNodeFlows(hostname string,
 
 	// For Windows Noencap Mode, the OVS flows for Node need be be exactly same as the provided 'flows' slice because
 	// the Node flows may be processed more than once if the MAC annotation is updated.
+	return c.modifyFlows(c.nodeFlowCache, hostname, flows)
+}
+
+// InstallMulticlusterNodeFlows installs flows for peer Gateway Node.
+func (c *client) InstallMulticlusterNodeFlows(hostname string,
+	peerConfigs map[*net.IPNet]net.IP,
+	tunnelPeerIP net.IP) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+
+	var flows []binding.Flow
+	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
+	for peerPodCIDR, _ := range peerConfigs {
+		flows = append(flows, c.l3FwdFlowToRemote(localGatewayMAC, *peerPodCIDR, tunnelPeerIP, cookie.Node))
+	}
 	return c.modifyFlows(c.nodeFlowCache, hostname, flows)
 }
 

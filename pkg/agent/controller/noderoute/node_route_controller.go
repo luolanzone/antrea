@@ -279,6 +279,9 @@ func (c *Controller) removeStaleTunnelPorts() error {
 		if interfaceConfig.InterfaceName == c.nodeConfig.DefaultTunName {
 			continue
 		}
+		if interfaceConfig.InterfaceName == c.nodeConfig.MulticlusterConfig.TunnelName {
+			continue
+		}
 		if err := c.ovsBridgeClient.DeletePort(interfaceConfig.PortUUID); err != nil {
 			klog.Errorf("Failed to delete OVS tunnel port %s: %v", interfaceConfig.InterfaceName, err)
 		} else {
@@ -532,7 +535,7 @@ func (c *Controller) addNodeRoute(nodeName string, node *corev1.Node) error {
 
 		peerPodCIDRAddr, peerPodCIDR, err := net.ParseCIDR(podCIDR)
 		if err != nil {
-			klog.Errorf("Failed to parse PodCIDR %s for Node %s", node.Spec.PodCIDR, nodeName)
+			klog.Errorf("Failed to parse PodCIDR %s for Node %s", podCIDR, nodeName)
 			return nil
 		}
 		peerGatewayIP := ip.NextIP(peerPodCIDRAddr)

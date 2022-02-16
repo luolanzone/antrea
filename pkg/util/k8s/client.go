@@ -32,7 +32,7 @@ import (
 // CreateClients creates kube clients from the given config.
 func CreateClients(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (
 	clientset.Interface, aggregatorclientset.Interface, crdclientset.Interface, apiextensionclientset.Interface, error) {
-	kubeConfig, err := createRestConfig(config, kubeAPIServerOverride)
+	kubeConfig, err := CreateRestConfig(config, kubeAPIServerOverride)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -61,7 +61,7 @@ func CreateClients(config componentbaseconfig.ClientConnectionConfiguration, kub
 
 // CreateLegacyCRDClient creates legacyCRD client from the given config.
 func CreateLegacyCRDClient(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (legacycrdclientset.Interface, error) {
-	kubeConfig, err := createRestConfig(config, kubeAPIServerOverride)
+	kubeConfig, err := CreateRestConfig(config, kubeAPIServerOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func CreateLegacyCRDClient(config componentbaseconfig.ClientConnectionConfigurat
 
 // CreateNetworkAttachDefClient creates net-attach-def client handle from the given config.
 func CreateNetworkAttachDefClient(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (netdefclient.K8sCniCncfIoV1Interface, error) {
-	kubeConfig, err := createRestConfig(config, kubeAPIServerOverride)
+	kubeConfig, err := CreateRestConfig(config, kubeAPIServerOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func CreateNetworkAttachDefClient(config componentbaseconfig.ClientConnectionCon
 
 }
 
-func createRestConfig(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (*rest.Config, error) {
+func CreateRestConfig(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (*rest.Config, error) {
 	var kubeConfig *rest.Config
 	var err error
 

@@ -15,6 +15,8 @@
 package noderoute
 
 import (
+	"fmt"
+	"net"
 	"time"
 
 	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
@@ -26,6 +28,8 @@ import (
 	"antrea.io/antrea/pkg/agent/openflow"
 	"antrea.io/antrea/pkg/agent/route"
 	"antrea.io/antrea/pkg/ovs/ovsconfig"
+	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -42,6 +46,8 @@ const (
 
 	// Default number of workers processing a TunnelEndpoint change
 	defaultWorkers = 1
+
+	tunnelEndpointInfoSubnetsIndexName = "teSubnets"
 )
 
 // Controller is responsible for setting up necessary tunnel, IP routes and
@@ -58,7 +64,13 @@ type Controller struct {
 	teLister        mclisters.TunnelEndpointLister
 	teListerSynced  cache.InformerSynced
 	queue           workqueue.RateLimitingInterface
+	installedTE     cache.Indexer
 	namespace       string
+}
+type teInfo struct {
+	name    string
+	subnets []string
+	peerIP  string
 }
 
 func NewMCAgentRouteController(
@@ -84,6 +96,7 @@ func NewMCAgentRouteController(
 		teLister:        teInformer.Lister(),
 		teListerSynced:  teInformer.Informer().HasSynced,
 		queue:           workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "gatewayroute"),
+		installedTE:     cache.NewIndexer(tunnelEndpointInfoKeyFunc, cache.Indexers{tunnelEndpointInfoSubnetsIndexName: tunnelEndpointInfoSubnetsIndexFunc}),
 		namespace:       namespace,
 	}
 	controller.teInformer.Informer().AddEventHandlerWithResyncPeriod(
@@ -101,6 +114,14 @@ func NewMCAgentRouteController(
 		teResyncPeriod,
 	)
 	return controller
+}
+
+func tunnelEndpointInfoKeyFunc(obj interface{}) (string, error) {
+	return obj.(*teInfo).name, nil
+}
+
+func tunnelEndpointInfoSubnetsIndexFunc(obj interface{}) ([]string, error) {
+	return obj.(*teInfo).subnets, nil
 }
 
 func (c *Controller) enqueueTunnelEndpoint(obj interface{}) {
@@ -138,10 +159,6 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 
 	if err := c.reconcile(); err != nil {
 		klog.ErrorS(err, "Error during reconciliation", "controller", controllerName)
-	}
-
-	if err := c.initialize(); err != nil {
-		klog.ErrorS(err, "Error during initialization", "controller", controllerName)
 	}
 
 	for i := 0; i < defaultWorkers; i++ {
@@ -192,12 +209,56 @@ func (c *Controller) syncMCRoute(teName string) error {
 }
 
 func (c *Controller) deleteMCNodeRoute(teName string) error {
-	klog.InfoS("Deleting Node Route", "tunnelenpoint", teName)
+	klog.InfoS("Deleting Node Route for Multicluster", "tunnelenpoint", teName)
 	return nil
 }
 
 func (c *Controller) addMCNodeRoute(te *mcv1alpha1.TunnelEndpoint) error {
-	klog.InfoS("Adding Node Route", "tunnelenpoint", klog.KObj(te), "node", c.nodeConfig.Name)
+	var peerNodeIP string
+	if te.Spec.PrivateIP != "" {
+		peerNodeIP = te.Spec.PrivateIP
+	} else if te.Spec.PublicIP != "" {
+		peerNodeIP = te.Spec.PublicIP
+	} else {
+		// If no valid Gateway Node IP is configured in TunnelEndpoint.Spec, return immediately.
+		return nil
+	}
+
+	cachedTE, installed, _ := c.installedTE.GetByKey(te.Name)
+	if installed && elementsMatch(cachedTE.(*teInfo).subnets, te.Spec.Subnets) &&
+		cachedTE.(*teInfo).peerIP == peerNodeIP {
+		return nil
+	}
+	if len(te.Spec.Subnets) == 0 {
+		// If no valid subnet is configured in TunnelEndpoint.Spec, return immediately.
+		return nil
+	}
+	klog.InfoS("Adding Node Route for Multicluster", "tunnelenpoint", klog.KObj(te), "node", c.nodeConfig.Name)
+	peerConfigs := make(map[*net.IPNet]net.IP, len(te.Spec.Subnets))
+	for _, subnet := range te.Spec.Subnets {
+		peerCIDRAddr, peerCIDR, err := net.ParseCIDR(subnet)
+		if err != nil {
+			klog.Errorf("Failed to parse subnet %s for TunnelEndpoint %s", subnet, te.Name)
+			return nil
+		}
+		peerGatewayIP := ip.NextIP(peerCIDRAddr)
+		peerConfigs[peerCIDR] = peerGatewayIP
+	}
+
+	klog.InfoS("Adding flows to Node for Multicluster", "Node", te.Spec.Hostname, "subnets", te.Spec.Subnets)
+	if err := c.ofClient.InstallMulticlusterNodeFlows(
+		"mc-"+te.Spec.Hostname,
+		peerConfigs,
+		net.ParseIP(peerNodeIP)); err != nil {
+		return fmt.Errorf("failed to install flows to Node %s: %v", te.Spec.Hostname, err)
+	}
+
+	c.installedTE.Add(&teInfo{
+		name:    te.Name,
+		subnets: te.Spec.Subnets,
+		peerIP:  peerNodeIP,
+	})
+
 	return nil
 }
 
@@ -207,8 +268,27 @@ func (c *Controller) reconcile() error {
 	return nil
 }
 
-func (c *Controller) initialize() error {
-	klog.Infof("Initialization for %s", controllerName)
-	klog.InfoS("Create default tunnel port for Multicluster")
-	return nil
+// ParseMCTunnelInterfaceConfig initializes and returns an InterfaceConfig struct
+// for a multicluster tunnel interface.
+func ParseMCTunnelInterfaceConfig(
+	portData *ovsconfig.OVSPortData,
+	portConfig *interfacestore.OVSPortConfig) *interfacestore.InterfaceConfig {
+	if portData.Options == nil {
+		klog.V(2).Infof("OVS port %s has no options", portData.Name)
+		return nil
+	}
+	_, localIP, _, csum := ovsconfig.ParseTunnelInterfaceOptions(portData)
+
+	var interfaceConfig = interfacestore.NewTunnelInterface(portData.Name, ovsconfig.TunnelType(portData.IFType), localIP, csum)
+	interfaceConfig.OVSPortConfig = portConfig
+	return interfaceConfig
+}
+
+type dummyT struct{}
+
+func (t dummyT) Errorf(string, ...interface{}) {}
+
+// elementsMatch compares array ignoring the order of elements.
+func elementsMatch(listA, listB interface{}) bool {
+	return assert.ElementsMatch(dummyT{}, listA, listB)
 }

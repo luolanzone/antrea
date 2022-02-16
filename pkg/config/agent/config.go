@@ -181,6 +181,8 @@ type AgentConfig struct {
 	AntreaProxy AntreaProxyConfig `yaml:"antreaProxy,omitempty"`
 	// Egress related configurations.
 	Egress EgressConfig `yaml:"egress"`
+	// Multicluster related configurations.
+	Multicluster MulticlusterConfig `yaml:"multicluster"`
 }
 
 type AntreaProxyConfig struct {
@@ -225,4 +227,9 @@ type NodePortLocalConfig struct {
 
 type EgressConfig struct {
 	ExceptCIDRs []string `yaml:"exceptCIDRs,omitempty"`
+}
+
+type MulticlusterConfig struct {
+	// Tunnel protocols used for encapsulating traffic across clusters.
+	TunnelType string `yaml:"tunnelType,omitempty"`
 }

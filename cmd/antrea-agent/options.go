@@ -166,6 +166,12 @@ func (o *Options) validate(args []string) error {
 			}
 		}
 	}
+	if features.DefaultFeatureGate.Enabled(features.Multicluster) {
+		// We should support only one type of tunnel at this moment, 'vxlan' as an example.
+		if o.config.Multicluster.TunnelType != "vxlan" {
+			return fmt.Errorf("Multicluster tunnel type %s is invalid, only vxlan is supported", o.config.Multicluster.TunnelType)
+		}
+	}
 	if features.DefaultFeatureGate.Enabled(features.NodePortLocal) {
 		startPort, endPort, err := parsePortRange(o.config.NodePortLocal.PortRange)
 		if err != nil {

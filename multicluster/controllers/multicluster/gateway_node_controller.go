@@ -129,6 +129,7 @@ func (r *GatewayNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	nodeHostname := node.Labels["kubernetes.io/hostname"]
+	// TODO: retrieve ClusterCIDR from Pod directly when https://github.com/kubernetes/enhancements/issues/2593 is resolved.
 	clusterPodCIDRs, err := r.getClusterPodCIDRs(ctx)
 	if err != nil {
 		return ctrl.Result{}, err

@@ -132,7 +132,7 @@ func (r *MemberClusterSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *MemberClusterSetReconciler) updateMultiClusterSetOnMemberCluster(clusterSet *multiclusterv1alpha1.ClusterSet) error {
 	if r.RemoteCommonAreaManager == nil {
-		r.RemoteCommonAreaManager = commonarea.NewRemoteCommonAreaManager(r.clusterSetID, r.clusterID)
+		r.RemoteCommonAreaManager = commonarea.NewRemoteCommonAreaManager(r.clusterSetID, r.clusterID, r.Namespace)
 		err := r.RemoteCommonAreaManager.Start()
 		if err != nil {
 			klog.ErrorS(err, "error starting RemoteCommonAreaManager")

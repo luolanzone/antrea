@@ -17,11 +17,13 @@ import corev1 "k8s.io/api/core/v1"
 
 const (
 	AntreaMCServiceAnnotation = "multicluster.antrea.io/imported-service"
+	GatewayNodeAnnotation     = "multicluster.antrea.io/gateway"
 
-	AntreaMCSPrefix   = "antrea-mc-"
-	ServiceKind       = "Service"
-	EndpointsKind     = "Endpoints"
-	ServiceImportKind = "ServiceImport"
+	AntreaMCSPrefix    = "antrea-mc-"
+	ServiceKind        = "Service"
+	EndpointsKind      = "Endpoints"
+	TunnelEndpointKind = "TunnelEndpoint"
+	ServiceImportKind  = "ServiceImport"
 
 	SourceName      = "sourceName"
 	SourceNamespace = "sourceNamespace"
@@ -31,6 +33,7 @@ const (
 	DefaultWorkerCount = 5
 
 	ResourceExportFinalizer = "resourceexport.finalizers.antrea.io"
+	TunnelEndpointFinalizer = "tunnelendpoint.finalizers.antrea.io"
 )
 
 // TODO: Use NamespacedName stringer method instead of this. e.g. nsName.String()

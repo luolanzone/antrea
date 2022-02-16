@@ -42,7 +42,7 @@ var (
 func TestServiceExportReconciler_handleDeleteEvent(t *testing.T) {
 	localClusterID = "cluster-a"
 	leaderNamespace = "default"
-	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID))
+	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID), "kube-system")
 	go remoteMgr.Start()
 
 	existSvcResExport := &mcsv1alpha1.ResourceExport{
@@ -97,7 +97,7 @@ func TestServiceExportReconciler_handleDeleteEvent(t *testing.T) {
 func TestServiceExportReconciler_ExportNotFoundService(t *testing.T) {
 	localClusterID = "cluster-a"
 	leaderNamespace = "default"
-	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID))
+	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID), "kube-system")
 	go remoteMgr.Start()
 
 	existSvcExport := &k8smcsv1alpha1.ServiceExport{
@@ -131,7 +131,7 @@ func TestServiceExportReconciler_ExportNotFoundService(t *testing.T) {
 func TestServiceExportReconciler_ExportMCSService(t *testing.T) {
 	localClusterID = "cluster-a"
 	leaderNamespace = "default"
-	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID))
+	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID), "kube-system")
 	go remoteMgr.Start()
 
 	mcsSvc := svcNginx.DeepCopy()
@@ -167,7 +167,7 @@ func TestServiceExportReconciler_ExportMCSService(t *testing.T) {
 func TestServiceExportReconciler_handleServiceExportCreateEvent(t *testing.T) {
 	localClusterID = "cluster-a"
 	leaderNamespace = "default"
-	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID))
+	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID), "kube-system")
 	go remoteMgr.Start()
 
 	existSvcExport := &k8smcsv1alpha1.ServiceExport{
@@ -201,7 +201,7 @@ func TestServiceExportReconciler_handleServiceExportCreateEvent(t *testing.T) {
 func TestServiceExportReconciler_handleServiceUpdateEvent(t *testing.T) {
 	localClusterID = "cluster-a"
 	leaderNamespace = "default"
-	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID))
+	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID), "kube-system")
 	go remoteMgr.Start()
 
 	existSvcExport := &k8smcsv1alpha1.ServiceExport{

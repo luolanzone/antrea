@@ -59,15 +59,20 @@ type ResourceImportReconciler struct {
 	client.Client
 	Scheme              *runtime.Scheme
 	localClusterClient  client.Client
+	localClusterID      string
+	namespace           string
 	remoteCommonArea    RemoteCommonArea
 	installedResImports cache.Indexer
 }
 
-func NewResourceImportReconciler(client client.Client, scheme *runtime.Scheme, localClusterClient client.Client, remoteCommonArea RemoteCommonArea) *ResourceImportReconciler {
+func NewResourceImportReconciler(client client.Client, scheme *runtime.Scheme, localClusterClient client.Client,
+	localClusterID string, namespace string, remoteCommonArea RemoteCommonArea) *ResourceImportReconciler {
 	return &ResourceImportReconciler{
 		Client:             client,
 		Scheme:             scheme,
 		localClusterClient: localClusterClient,
+		localClusterID:     localClusterID,
+		namespace:          namespace,
 		remoteCommonArea:   remoteCommonArea,
 		installedResImports: cache.NewIndexer(resImportIndexerKeyFunc, cache.Indexers{
 			resImportIndexer: resImportIndexerFunc,
@@ -127,6 +132,11 @@ func (r *ResourceImportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return r.handleResImpDeleteForEndpoints(ctx, &resImp)
 		}
 		return r.handleResImpUpdateForEndpoints(ctx, &resImp)
+	case common.TunnelEndpointKind:
+		if isDeleted {
+			return r.handleResImpDeleteForTunnelEndpoint(ctx, req, &resImp)
+		}
+		return r.handleResImpForTunnelEndpoint(ctx, req, &resImp)
 	}
 	// TODO: handle for other ResImport Kinds
 	return ctrl.Result{}, nil

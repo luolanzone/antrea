@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	multiclustercontrollers "antrea.io/antrea/multicluster/controllers/multicluster"
 	"antrea.io/antrea/pkg/signals"
@@ -51,11 +52,22 @@ func runMember(o *Options) error {
 		return err
 	}
 
+	hookServer := mgr.GetWebhookServer()
+	hookServer.Register("/validate-multicluster-crd-antrea-io-v1alpha1-tunnelendpoint",
+		&webhook.Admission{Handler: &tunnelEndpointValidator{
+			Client:    mgr.GetClient(),
+			namespace: env.GetPodNamespace()}})
+	hookServer.Register("/validate-multicluster-crd-antrea-io-v1alpha1-tunnelendpointimport",
+		&webhook.Admission{Handler: &tunnelEndpointImportValidator{
+			Client:    mgr.GetClient(),
+			namespace: env.GetPodNamespace()}})
+
 	clusterSetReconciler := &multiclustercontrollers.MemberClusterSetReconciler{
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		Namespace: env.GetPodNamespace(),
 	}
+
 	if err = clusterSetReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating ClusterSet controller: %v", err)
 	}
@@ -66,6 +78,25 @@ func runMember(o *Options) error {
 		&clusterSetReconciler.RemoteCommonAreaManager)
 	if err = svcExportReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating ServiceExport controller: %v", err)
+	}
+
+	gwNodeReconciler := multiclustercontrollers.NewGatewayNodeReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		env.GetPodNamespace(),
+		&clusterSetReconciler.RemoteCommonAreaManager,
+		"")
+	if err = gwNodeReconciler.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("error creating Gateway Node controller: %v", err)
+	}
+
+	teReconciler := multiclustercontrollers.NewTunnelEndpointReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		env.GetPodNamespace(),
+		&clusterSetReconciler.RemoteCommonAreaManager)
+	if err = teReconciler.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("error creating TunnelEndpoint controller: %v", err)
 	}
 
 	stopCh := signals.RegisterSignalHandlers()

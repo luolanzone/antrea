@@ -1,0 +1,24 @@
+# permissions for end users to edit tunnelendpoints.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tunnelendpoint-editor-role
+rules:
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints/status
+  verbs:
+  - get

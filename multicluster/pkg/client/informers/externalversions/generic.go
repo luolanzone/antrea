@@ -66,6 +66,10 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Multicluster().V1alpha1().ResourceImports().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("resourceimportfilters"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Multicluster().V1alpha1().ResourceImportFilters().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("tunnelendpoints"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Multicluster().V1alpha1().TunnelEndpoints().Informer()}, nil
+	case v1alpha1.SchemeGroupVersion.WithResource("tunnelendpointimports"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Multicluster().V1alpha1().TunnelEndpointImports().Informer()}, nil
 
 	}
 

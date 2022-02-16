@@ -30,3 +30,7 @@ type ResourceExportFilterExpansion interface{}
 type ResourceImportExpansion interface{}
 
 type ResourceImportFilterExpansion interface{}
+
+type TunnelEndpointExpansion interface{}
+
+type TunnelEndpointImportExpansion interface{}

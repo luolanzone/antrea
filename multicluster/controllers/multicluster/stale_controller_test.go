@@ -33,7 +33,7 @@ import (
 )
 
 func TestStaleController_CleanupService(t *testing.T) {
-	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID))
+	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID), "kube-system")
 	go remoteMgr.Start()
 
 	mcSvcNginx := svcNginx.DeepCopy()
@@ -125,7 +125,7 @@ func TestStaleController_CleanupService(t *testing.T) {
 
 func TestStaleController_CleanupResourceExport(t *testing.T) {
 	localClusterID = "cluster-a"
-	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID))
+	remoteMgr := commonarea.NewRemoteCommonAreaManager("test-clusterset", common.ClusterID(localClusterID), "kube-system")
 	go remoteMgr.Start()
 
 	svcExpNginx := k8smcsv1alpha1.ServiceExport{

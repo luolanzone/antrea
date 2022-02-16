@@ -72,3 +72,19 @@ type ResourceImportFilterListerExpansion interface{}
 // ResourceImportFilterNamespaceListerExpansion allows custom methods to be added to
 // ResourceImportFilterNamespaceLister.
 type ResourceImportFilterNamespaceListerExpansion interface{}
+
+// TunnelEndpointListerExpansion allows custom methods to be added to
+// TunnelEndpointLister.
+type TunnelEndpointListerExpansion interface{}
+
+// TunnelEndpointNamespaceListerExpansion allows custom methods to be added to
+// TunnelEndpointNamespaceLister.
+type TunnelEndpointNamespaceListerExpansion interface{}
+
+// TunnelEndpointImportListerExpansion allows custom methods to be added to
+// TunnelEndpointImportLister.
+type TunnelEndpointImportListerExpansion interface{}
+
+// TunnelEndpointImportNamespaceListerExpansion allows custom methods to be added to
+// TunnelEndpointImportNamespaceLister.
+type TunnelEndpointImportNamespaceListerExpansion interface{}

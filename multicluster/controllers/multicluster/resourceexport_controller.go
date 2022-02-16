@@ -81,8 +81,22 @@ func NewResourceExportReconciler(
 func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	klog.V(2).InfoS("reconciling ResourceExport", "resourceexport", req.NamespacedName)
 	var resExport mcsv1alpha1.ResourceExport
-	if err := r.Client.Get(ctx, req.NamespacedName, &resExport); err != nil {
+	var err error
+	if err = r.Client.Get(ctx, req.NamespacedName, &resExport); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	switch resExport.Spec.Kind {
+	case common.ServiceKind:
+		klog.V(2).InfoS("Reconciling Service type of ResourceExport", "resourceexport", req.NamespacedName)
+	case common.EndpointsKind:
+		klog.V(2).InfoS("Reconciling Endpoint type of ResourceExport", "resourceexport", req.NamespacedName)
+	case common.TunnelEndpointKind:
+		return r.handleTunnelEndpoint(ctx, req, resExport)
+	// Developer can add more supported kinds here in the future.
+	default:
+		klog.V(2).InfoS("It's not expected kind, skip reconciling ResourceExport", "resourceexport", req.NamespacedName)
+		return ctrl.Result{}, nil
 	}
 
 	// We are using Finalizers to implement asynchronous pre-delete hooks.
@@ -96,11 +110,7 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			resExport.SetFinalizers(common.RemoveStringFromSlice(resExport.Finalizers, common.ResourceExportFinalizer))
-			if err := r.Client.Update(ctx, &resExport, &client.UpdateOptions{}); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
+			return r.deleteResourceExport(resExport)
 		}
 		return ctrl.Result{}, nil
 	}
@@ -422,6 +432,14 @@ func (r *ResourceExportReconciler) updateResourceExportStatus(resExport *mcsv1al
 	if err != nil {
 		klog.ErrorS(err, "failed to update ResourceExport status", "resourceexport", klog.KObj(resExport))
 	}
+}
+
+func (r *ResourceExportReconciler) deleteResourceExport(resExport mcsv1alpha1.ResourceExport) (ctrl.Result, error) {
+	resExport.SetFinalizers(common.RemoveStringFromSlice(resExport.Finalizers, common.ResourceExportFinalizer))
+	if err := r.Client.Update(ctx, &resExport, &client.UpdateOptions{}); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

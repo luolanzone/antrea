@@ -36,6 +36,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - services
   verbs:
   - create
@@ -223,6 +231,32 @@ rules:
   - multicluster.crd.antrea.io
   resources:
   - resourceimports/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
+  - tunnelendpoints/status
   verbs:
   - get
   - patch
@@ -527,7 +561,7 @@ kind: Service
 metadata:
   labels:
     app: antrea
-    control-plane: antrea-mc-controller
+    component: antrea-mc-controller
   name: antrea-mc-controller-metrics-service
   namespace: changeme
 spec:
@@ -537,7 +571,7 @@ spec:
     targetPort: https
   selector:
     app: antrea
-    control-plane: antrea-mc-controller
+    component: antrea-mc-controller
 ---
 apiVersion: v1
 kind: Service
@@ -552,14 +586,14 @@ spec:
     targetPort: 9443
   selector:
     app: antrea
-    control-plane: antrea-mc-controller
+    component: antrea-mc-controller
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
     app: antrea
-    control-plane: antrea-mc-controller
+    component: antrea-mc-controller
   name: antrea-mc-controller
   namespace: changeme
 spec:
@@ -567,12 +601,12 @@ spec:
   selector:
     matchLabels:
       app: antrea
-      control-plane: antrea-mc-controller
+      component: antrea-mc-controller
   template:
     metadata:
       labels:
         app: antrea
-        control-plane: antrea-mc-controller
+        component: antrea-mc-controller
     spec:
       containers:
       - args:
@@ -856,4 +890,52 @@ webhooks:
     - UPDATE
     resources:
     - memberclusterannounces
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      name: antrea-mc-webhook-service
+      namespace: changeme
+      path: /validate-multicluster-crd-antrea-io-v1alpha1-tunnelendpoint
+  failurePolicy: Fail
+  name: vtunnelendpoint.kb.io
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: changeme
+  rules:
+  - apiGroups:
+    - multicluster.crd.antrea.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - tunnelendpoints
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      name: antrea-mc-webhook-service
+      namespace: changeme
+      path: /validate-multicluster-crd-antrea-io-v1alpha1-tunnelendpointimport
+  failurePolicy: Fail
+  name: vtunnelendpointimport.kb.io
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: changeme
+  rules:
+  - apiGroups:
+    - multicluster.crd.antrea.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - tunnelendpointimports
   sideEffects: None

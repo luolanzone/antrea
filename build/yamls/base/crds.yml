@@ -890,6 +890,10 @@ spec:
                           properties:
                             protocol:
                               type: string
+                              enum:
+                                - TCP
+                                - UDP
+                                - STCP
                             port:
                               x-kubernetes-int-or-string: true
                             endPort:

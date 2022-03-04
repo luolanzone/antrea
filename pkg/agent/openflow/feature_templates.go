@@ -113,6 +113,7 @@ const (
 	Egress          featureName = "Egress"
 	Traceflow       featureName = "Traceflow"
 	Multicast       featureName = "Multicast"
+	Multicluster    featureName = "Multicluster"
 )
 
 // featureTemplate is a map to store which Stages and FeatureTables will be used for a Feature.
@@ -366,4 +367,11 @@ func (c *featureMulticast) getTemplate(p pipeline) *featureTemplate {
 			},
 		},
 	}
+}
+
+func (c *featureMulticluster) getTemplate(p pipeline) *featureTemplate {
+	if p != pipelineIP {
+		return nil
+	}
+	return &featureTemplate{}
 }

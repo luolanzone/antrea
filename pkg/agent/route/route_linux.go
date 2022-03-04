@@ -869,6 +869,7 @@ func (c *Client) AddRoutes(podCIDR *net.IPNet, nodeName string, nodeIP, nodeGwIP
 	routes = append(routes, route)
 
 	for _, route := range routes {
+		klog.Infof("install route to peer %s (%s) with netlink. Route config: %s.", nodeName, nodeIP, route.String())
 		if err := netlink.RouteReplace(route); err != nil {
 			return fmt.Errorf("failed to install route to peer %s (%s) with netlink. Route config: %s. Error: %v", nodeName, nodeIP, route.String(), err)
 		}

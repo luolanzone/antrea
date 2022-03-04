@@ -37,6 +37,7 @@ const (
 	Service
 	Policy
 	SNAT
+	Multicluster
 )
 
 func (c Category) String() string {
@@ -55,6 +56,8 @@ func (c Category) String() string {
 		return "Policy"
 	case SNAT:
 		return "SNAT"
+	case Multicluster:
+		return "Multicluster"
 	default:
 		return "Invalid"
 	}

@@ -28,12 +28,13 @@ var (
 	//   - 2: from local Pods.
 	//   - 3: from uplink interface.
 	//   - 4: from bridge local interface.
-	PktSourceField     = binding.NewRegField(0, 0, 3, "PacketSource")
-	FromTunnelRegMark  = binding.NewRegMark(PktSourceField, 0)
-	FromGatewayRegMark = binding.NewRegMark(PktSourceField, 1)
-	FromLocalRegMark   = binding.NewRegMark(PktSourceField, 2)
-	FromUplinkRegMark  = binding.NewRegMark(PktSourceField, 3)
-	FromBridgeRegMark  = binding.NewRegMark(PktSourceField, 4)
+	PktSourceField      = binding.NewRegField(0, 0, 3, "PacketSource")
+	FromTunnelRegMark   = binding.NewRegMark(PktSourceField, 0)
+	FromGatewayRegMark  = binding.NewRegMark(PktSourceField, 1)
+	FromLocalRegMark    = binding.NewRegMark(PktSourceField, 2)
+	FromUplinkRegMark   = binding.NewRegMark(PktSourceField, 3)
+	FromBridgeRegMark   = binding.NewRegMark(PktSourceField, 4)
+	FromMCTunnelRegMark = binding.NewRegMark(PktSourceField, 5)
 	// reg0[4..7]: Field to store the packet destination. Marks in this field include,
 	//   - 0: to tunnel interface.
 	//   - 1: to local Antrea gateway interface.
@@ -52,6 +53,7 @@ var (
 	ToUplinkRegMark     = binding.NewRegMark(PktDestinationField, 3)
 	ToNodeRegMark       = binding.NewRegMark(PktDestinationField, 4)
 	ToExternalRegMark   = binding.NewRegMark(PktDestinationField, 5)
+	ToMCTunnelRegMark   = binding.NewRegMark(PktDestinationField, 6)
 	// reg0[0...7]: Union field of the packet source and destination. It is used to mark the hairpin packet. Marks in
 	// this field include,
 	//  - 0x41: the packet sourced from Antrea gateway interface, and destined for local Node via Antrea gateway interface.

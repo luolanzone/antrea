@@ -80,6 +80,7 @@ type Controller struct {
 	installedNodes  cache.Indexer
 	wireGuardClient wireguard.Interface
 	proxyAll        bool
+	multiCluster    bool
 }
 
 // NewNodeRouteController instantiates a new Controller object which will process Node events
@@ -95,6 +96,7 @@ func NewNodeRouteController(
 	nodeConfig *config.NodeConfig,
 	wireguardClient wireguard.Interface,
 	proxyAll bool,
+	multiCluster bool,
 ) *Controller {
 	nodeInformer := informerFactory.Core().V1().Nodes()
 	svcLister := informerFactory.Core().V1().Services()
@@ -114,6 +116,7 @@ func NewNodeRouteController(
 		installedNodes:   cache.NewIndexer(nodeRouteInfoKeyFunc, cache.Indexers{nodeRouteInfoPodCIDRIndexName: nodeRouteInfoPodCIDRIndexFunc}),
 		wireGuardClient:  wireguardClient,
 		proxyAll:         proxyAll,
+		multiCluster:     multiCluster,
 	}
 	nodeInformer.Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
@@ -277,6 +280,10 @@ func (c *Controller) removeStaleTunnelPorts() error {
 			continue
 		}
 		if interfaceConfig.InterfaceName == c.nodeConfig.DefaultTunName {
+			continue
+		}
+
+		if interfaceConfig.InterfaceName == c.nodeConfig.MulticlusterConfig.TunnelName && c.multiCluster {
 			continue
 		}
 		if err := c.ovsBridgeClient.DeletePort(interfaceConfig.PortUUID); err != nil {

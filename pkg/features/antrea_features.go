@@ -81,6 +81,10 @@ const (
 	// Enable Multicast.
 	Multicast featuregate.Feature = "Multicast"
 
+	// alpha: v1.6
+	// Enable Multicluster.
+	Multicluster featuregate.Feature = "Multicluster"
+
 	// alpha: v1.5
 	// Enable Secondary interface feature for Antrea.
 	SecondaryNetwork featuregate.Feature = "SecondaryNetwork"
@@ -113,6 +117,7 @@ var (
 		NodePortLocal:      {Default: true, PreRelease: featuregate.Beta},
 		NodeIPAM:           {Default: false, PreRelease: featuregate.Alpha},
 		Multicast:          {Default: false, PreRelease: featuregate.Alpha},
+		Multicluster:       {Default: false, PreRelease: featuregate.Alpha},
 		SecondaryNetwork:   {Default: false, PreRelease: featuregate.Alpha},
 		ServiceExternalIP:  {Default: false, PreRelease: featuregate.Alpha},
 	}

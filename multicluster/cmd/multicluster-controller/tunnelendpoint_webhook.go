@@ -18,15 +18,9 @@ package main
 
 import (
 	"context"
-	"errors"
-	"net/http"
 
-	"k8s.io/apiserver/pkg/authentication/serviceaccount"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
-	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 )
 
 const defaultServiceAccount = "antrea-mc-controller"
@@ -41,22 +35,22 @@ type tunnelEndpointValidator struct {
 
 // Handle handles admission requests.
 func (v *tunnelEndpointValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
-	tunnelEndpoint := &mcv1alpha1.TunnelEndpoint{}
-	if err := v.decoder.Decode(req, tunnelEndpoint); err != nil {
-		klog.ErrorS(err, "error while decoding tunnelEndpoint")
-		return admission.Errored(http.StatusBadRequest, err)
-	}
+	// tunnelEndpoint := &mcv1alpha1.TunnelEndpoint{}
+	// if err := v.decoder.Decode(req, tunnelEndpoint); err != nil {
+	// 	klog.ErrorS(err, "error while decoding tunnelEndpoint")
+	// 	return admission.Errored(http.StatusBadRequest, err)
+	// }
 
-	ui := req.UserInfo
-	_, saName, err := serviceaccount.SplitUsername(ui.Username)
-	if err != nil {
-		klog.ErrorS(err, "error getting ServiceAccount name", "request", req)
-		return admission.Errored(http.StatusBadRequest, errors.New("only ServiceAccount is allowed to create TunnelEndpoint"))
-	}
+	// ui := req.UserInfo
+	// _, saName, err := serviceaccount.SplitUsername(ui.Username)
+	// if err != nil {
+	// 	klog.ErrorS(err, "error getting ServiceAccount name", "request", req)
+	// 	return admission.Errored(http.StatusBadRequest, errors.New("only ServiceAccount is allowed to create TunnelEndpoint"))
+	// }
 
-	if saName != defaultServiceAccount {
-		return admission.Denied("only Antrea Multicluster Controller ServiceAccount is allowed to create TunnelEndpoint")
-	}
+	// if saName != defaultServiceAccount {
+	// 	return admission.Denied("only Antrea Multicluster Controller ServiceAccount is allowed to create TunnelEndpoint")
+	// }
 	return admission.Allowed("")
 }
 

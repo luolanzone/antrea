@@ -198,7 +198,9 @@ func (r *GatewayNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			},
 		}
 		te.Finalizers = []string{common.TunnelEndpointFinalizer}
-		// Create a TunnelEndpoint when there is a Gateway Node
+		if err := r.updateTunnelEndpointIP(te, node); err != nil {
+			return ctrl.Result{RequeueAfter: defaultRequeueDuration}, err
+		}
 		if err := r.Client.Create(ctx, te, &client.CreateOptions{}); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -269,7 +271,7 @@ func (r *GatewayNodeReconciler) updateTunnelEndpoint(ctx context.Context,
 	if err := r.Client.Update(ctx, te, &client.UpdateOptions{}); err != nil {
 		return err
 	}
-	klog.InfoS("The TunnelEndpoint is updated for a Node", "tunneledpoint", klog.KObj(te), "node", node.Name)
+	klog.InfoS("The TunnelEndpoint is updated for a Node", "tunnelendpoint", klog.KObj(te), "node", node.Name)
 	r.installedTE.Update(te)
 	return nil
 }
@@ -278,7 +280,7 @@ func (r *GatewayNodeReconciler) updateTunnelEndpoint(ctx context.Context,
 func (r *GatewayNodeReconciler) getSubnets(ctx context.Context) ([]string, error) {
 	clusterPodCIDRs, err := r.getClusterPodCIDRs(ctx)
 	if err != nil {
-		klog.InfoS("Fail to get cluster PoDCIDRs")
+		klog.InfoS("Fail to get cluster PodCIDRs")
 		return nil, err
 	}
 	if r.clusterIPCIDR == "" {
@@ -337,7 +339,7 @@ func (r *GatewayNodeReconciler) findClusterIPRangeFromServiceCreation(ctx contex
 
 	err := r.Create(ctx, invalidSvcSpec, &client.CreateOptions{})
 
-	// creating invalid Service didn't fail as expected
+	// Creating invalid Service didn't fail as expected
 	if err == nil {
 		return "", fmt.Errorf("could not determine the Service IP range via Service creation - " +
 			"expected a specific error but none was returned")

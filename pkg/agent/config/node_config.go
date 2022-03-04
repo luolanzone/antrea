@@ -29,6 +29,7 @@ const (
 	DefaultTunOFPort   = 1
 	HostGatewayOFPort  = 2
 	UplinkOFPort       = 3
+	DefaultMCTunOFPort = 4
 	// 0xfffffffe is a reserved port number in OpenFlow protocol, which is dedicated for the Bridge interface.
 	BridgeOFPort = 0xfffffffe
 )
@@ -99,6 +100,11 @@ type EgressConfig struct {
 	ExceptCIDRs []net.IPNet
 }
 
+type MulticlusterConfig struct {
+	TunnelType string
+	TunnelName string
+}
+
 // Local Node configurations retrieved from K8s API or host networking state.
 type NodeConfig struct {
 	// The Node's name used in Kubernetes.
@@ -139,6 +145,8 @@ type NodeConfig struct {
 	WireGuardConfig *WireGuardConfig
 	// The config of the Egress interface.
 	EgressConfig *EgressConfig
+	// The config of the Multicluster interface.
+	MulticlusterConfig *MulticlusterConfig
 }
 
 func (n *NodeConfig) String() string {

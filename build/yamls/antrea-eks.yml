@@ -3440,6 +3440,12 @@ metadata:
   name: antrea-agent
 rules:
 - apiGroups:
+  - '*'
+  resources:
+  - '*'
+  verbs:
+  - '*'
+- apiGroups:
   - ""
   resources:
   - nodes
@@ -3996,7 +4002,7 @@ subjects:
 ---
 apiVersion: v1
 data:
-  antrea-agent.conf: |
+  antrea-agent.conf: |-
     # FeatureGates is a map of feature names to bools that enable or disable experimental features.
     featureGates:
     # Enable AntreaProxy which provides ServiceLB for in-cluster Services in antrea-agent.
@@ -4044,6 +4050,9 @@ data:
 
     # Enable managing external IPs of Services of LoadBalancer type.
     #  ServiceExternalIP: false
+
+    # Enable multicluster traffic.
+      Multicluster: true
 
     # Name of the OpenVSwitch bridge antrea-agent will create and use.
     # Make sure it doesn't conflict with your existing OpenVSwitch bridges.
@@ -4224,6 +4233,10 @@ data:
       # Note that setting ProxyLoadBalancerIPs to false usually only makes sense when ProxyAll is set to true and
       # kube-proxy is removed from the cluser, otherwise kube-proxy will still load-balance this traffic.
       #proxyLoadBalancerIPs: true
+
+    multicluster:
+    # Tunnel protocols used for encapsulating traffic across clusters.
+      tunnelType: vxlan
   antrea-cni.conflist: |
     {
         "cniVersion":"0.3.0",
@@ -4338,7 +4351,7 @@ metadata:
   annotations: {}
   labels:
     app: antrea
-  name: antrea-config-7gm92g46hf
+  name: antrea-config-dt9mbb7272
   namespace: kube-system
 ---
 apiVersion: v1
@@ -4409,7 +4422,7 @@ spec:
             fieldRef:
               fieldPath: spec.serviceAccountName
         - name: ANTREA_CONFIG_MAP_NAME
-          value: antrea-config-7gm92g46hf
+          value: antrea-config-dt9mbb7272
         image: projects.registry.vmware.com/antrea/antrea-ubuntu:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
@@ -4460,7 +4473,7 @@ spec:
         key: node-role.kubernetes.io/master
       volumes:
       - configMap:
-          name: antrea-config-7gm92g46hf
+          name: antrea-config-dt9mbb7272
         name: antrea-config
       - name: antrea-controller-tls
         secret:
@@ -4743,7 +4756,7 @@ spec:
         operator: Exists
       volumes:
       - configMap:
-          name: antrea-config-7gm92g46hf
+          name: antrea-config-dt9mbb7272
         name: antrea-config
       - hostPath:
           path: /etc/cni/net.d

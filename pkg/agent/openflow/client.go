@@ -310,6 +310,26 @@ type Client interface {
 		dstIP net.IP,
 		outPort uint32,
 		igmp ofutil.Message) error
+
+	InstallMulticlusterNodeFlows(
+		hostname string,
+		peerConfigs map[*net.IPNet]net.IP,
+		mcTunOFPort uint32,
+		tunnelPeerIP net.IP) error
+
+	InstallMulticlusterLocalClassifier(
+		hostname string,
+		tunnelOFPort uint32,
+		peerSubnets []net.IPNet) error
+
+	InstallMulticlusterRemoteClassifier(
+		hostname string,
+		tunnelOFPort uint32,
+		peerSubnets []net.IPNet) error
+
+	InstallMCL2Forwarding(hostname string, tunnelOFPort uint32) error
+
+	UninstallMulticlusterNodeFlows(hostname string) error
 }
 
 // GetFlowTableStatus returns an array of flow table status.
@@ -451,7 +471,7 @@ func (c *client) InstallNodeFlows(hostname string,
 		// Addresses (IPv4 and IPv6) .
 		if (!isIPv6 && c.networkConfig.NeedsTunnelToPeer(tunnelPeerIPs.IPv4, c.nodeConfig.NodeTransportIPv4Addr)) ||
 			(isIPv6 && c.networkConfig.NeedsTunnelToPeer(tunnelPeerIPs.IPv6, c.nodeConfig.NodeTransportIPv6Addr)) {
-			flows = append(flows, c.featurePodConnectivity.l3FwdFlowToRemoteViaTun(cookie.Node, localGatewayMAC, *peerPodCIDR, tunnelPeerIP))
+			flows = append(flows, c.featurePodConnectivity.l3FwdFlowToRemoteViaTun(cookie.Node, localGatewayMAC, *peerPodCIDR, tunnelPeerIP, ToTunnelRegMark, GlobalVirtualMAC))
 		} else {
 			flows = append(flows, c.featurePodConnectivity.l3FwdFlowToRemoteViaRouting(cookie.Node, localGatewayMAC, remoteGatewayMAC, tunnelPeerIP, peerPodCIDR)...)
 		}
@@ -840,6 +860,11 @@ func (c *client) initializeFeatures() map[pipeline][]*featureTemplate {
 		c.featureMulticast = newFeatureMulticast(c.cookieAllocator, []binding.Protocol{binding.ProtocolIP})
 		features = append(features, c.featureMulticast)
 	}
+
+	if c.enableMulticluster {
+		c.featureMulticluster = newFeatureMulticluster(c.cookieAllocator, []binding.Protocol{binding.ProtocolIP})
+		features = append(features, c.featureMulticluster)
+	}
 	c.activeFeatures = features
 
 	templatesMap := make(map[pipeline][]*featureTemplate)
@@ -1173,7 +1198,7 @@ func (c *client) SendUDPPacketOut(
 func (c *client) InstallMulticastInitialFlows(pktInReason uint8) error {
 	flows := c.featureMulticast.igmpPktInFlows(pktInReason)
 	flows = append(flows, c.featureMulticast.externalMulticastReceiverFlow())
-	cacheKey := fmt.Sprintf("multicast")
+	cacheKey := "multicast"
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 	return c.addFlows(c.featureMulticast.mcastFlowCache, cacheKey, flows)
@@ -1212,4 +1237,51 @@ func (c *client) SendIGMPQueryPacketOut(
 	packetOutBuilder = packetOutBuilder.SetIPProtocol(binding.ProtocolIGMP).SetL4Packet(igmp)
 	packetOutObj := packetOutBuilder.Done()
 	return c.bridge.SendPacketOut(packetOutObj)
+}
+
+// InstallMulticlusterNodeFlows installs flows for peer Gateway Node.
+func (c *client) InstallMulticlusterNodeFlows(hostname string,
+	peerConfigs map[*net.IPNet]net.IP,
+	mcTunOFPort uint32,
+	tunnelPeerIP net.IP) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+
+	var flows []binding.Flow
+	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
+	var regMark *binding.RegMark
+	if mcTunOFPort == 0 {
+		regMark = ToTunnelRegMark
+	} else {
+		regMark = ToMCTunnelRegMark
+	}
+	for peerPodCIDR := range peerConfigs {
+		flows = append(flows, c.featurePodConnectivity.l3FwdFlowToRemoteViaTun(cookie.Multicluster, localGatewayMAC, *peerPodCIDR, tunnelPeerIP, regMark, GlobalVirtualMACForMulticluster))
+	}
+
+	if mcTunOFPort != 0 {
+		flows = append(flows, c.featurePodConnectivity.tunnelClassifierFlow(cookie.Multicluster, mcTunOFPort))
+	}
+	return c.modifyFlows(c.featureMulticluster.gwNodeFlowCache, hostname, flows)
+}
+
+func (c *client) InstallMulticlusterLocalClassifier(hostname string, tunnelOFPort uint32, peerSubnets []net.IPNet) error {
+	flows := c.featureMulticluster.localClassifierFlows(tunnelOFPort, peerSubnets)
+	return c.modifyFlows(c.featureMulticluster.gwNodeFlowCache, hostname, flows)
+}
+
+func (c *client) InstallMulticlusterRemoteClassifier(hostname string, tunnelOFPort uint32, peerSubnets []net.IPNet) error {
+	flows := c.featureMulticluster.remoteClassifierFlows(tunnelOFPort, peerSubnets)
+	return c.modifyFlows(c.featureMulticluster.gwNodeFlowCache, hostname, flows)
+}
+
+func (c *client) InstallMCL2Forwarding(hostname string, tunnelOFPort uint32) error {
+	flow := c.featurePodConnectivity.l2ForwardCalcFlow(c.featureMulticluster.category, GlobalVirtualMACForMulticluster, tunnelOFPort)
+	return c.modifyFlows(c.featureMulticluster.gwNodeFlowCache, hostname, []binding.Flow{flow})
+}
+
+func (c *client) UninstallMulticlusterNodeFlows(hostname string) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+	return c.deleteFlows(c.featureMulticluster.gwNodeFlowCache, hostname)
 }

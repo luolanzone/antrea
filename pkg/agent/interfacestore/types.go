@@ -34,13 +34,14 @@ const (
 	// HostInterface is used to mark current interface is for host
 	HostInterface
 
-	AntreaInterfaceTypeKey = "antrea-type"
-	AntreaGateway          = "gateway"
-	AntreaContainer        = "container"
-	AntreaTunnel           = "tunnel"
-	AntreaUplink           = "uplink"
-	AntreaHost             = "host"
-	AntreaUnset            = ""
+	AntreaInterfaceTypeKey   = "antrea-type"
+	AntreaGateway            = "gateway"
+	AntreaContainer          = "container"
+	AntreaTunnel             = "tunnel"
+	AntreaMulticlusterTunnel = "mc-tunnel"
+	AntreaUplink             = "uplink"
+	AntreaHost               = "host"
+	AntreaUnset              = ""
 )
 
 type InterfaceType uint8

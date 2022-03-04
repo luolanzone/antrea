@@ -37,6 +37,7 @@ import (
 	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/controller/noderoute"
 	"antrea.io/antrea/pkg/agent/interfacestore"
+	mcroute "antrea.io/antrea/pkg/agent/multicluster/noderoute"
 	"antrea.io/antrea/pkg/agent/openflow"
 	"antrea.io/antrea/pkg/agent/openflow/cookie"
 	"antrea.io/antrea/pkg/agent/route"
@@ -53,7 +54,9 @@ import (
 const (
 	// Default name of the default tunnel interface on the OVS bridge.
 	defaultTunInterfaceName = "antrea-tun0"
-	maxRetryForHostLink     = 5
+	// Default name of the default Multicluster tunnel interface on the OVS bridge.
+	defaultMCTunInterfaceName = "antrea-mc-tun0"
+	maxRetryForHostLink       = 5
 	// ipsecPSKEnvKey is environment variable.
 	ipsecPSKEnvKey          = "ANTREA_IPSEC_PSK"
 	roundNumKey             = "roundNum" // round number key in externalIDs.
@@ -89,11 +92,13 @@ type Initializer struct {
 	nodeConfig            *config.NodeConfig
 	wireGuardConfig       *config.WireGuardConfig
 	egressConfig          *config.EgressConfig
+	multiclusterConfig    *config.MulticlusterConfig
 	enableProxy           bool
 	connectUplinkToBridge bool
 	// networkReadyCh should be closed once the Node's network is ready.
 	// The CNI server will wait for it before handling any CNI Add requests.
 	proxyAll              bool
+	multicluster          bool
 	nodePortAddressesIPv4 []net.IP
 	nodePortAddressesIPv6 []net.IP
 	networkReadyCh        chan<- struct{}
@@ -114,10 +119,12 @@ func NewInitializer(
 	networkConfig *config.NetworkConfig,
 	wireGuardConfig *config.WireGuardConfig,
 	egressConfig *config.EgressConfig,
+	multiclusterConfig *config.MulticlusterConfig,
 	networkReadyCh chan<- struct{},
 	stopCh <-chan struct{},
 	enableProxy bool,
 	proxyAll bool,
+	multicluster bool,
 	nodePortAddressesIPv4 []net.IP,
 	nodePortAddressesIPv6 []net.IP,
 	connectUplinkToBridge bool,
@@ -136,10 +143,12 @@ func NewInitializer(
 		networkConfig:         networkConfig,
 		wireGuardConfig:       wireGuardConfig,
 		egressConfig:          egressConfig,
+		multiclusterConfig:    multiclusterConfig,
 		networkReadyCh:        networkReadyCh,
 		stopCh:                stopCh,
 		enableProxy:           enableProxy,
 		proxyAll:              proxyAll,
+		multicluster:          multicluster,
 		nodePortAddressesIPv4: nodePortAddressesIPv4,
 		nodePortAddressesIPv6: nodePortAddressesIPv6,
 		connectUplinkToBridge: connectUplinkToBridge,
@@ -179,6 +188,13 @@ func (i *Initializer) setupOVSBridge() error {
 	if err := i.setupDefaultTunnelInterface(); err != nil {
 		return err
 	}
+
+	// if i.multicluster {
+	// 	if err := i.setupMulticlusterTunnelInterface(); err != nil {
+	// 		return err
+	// 	}
+	// }
+
 	// Set up host gateway interface
 	err := i.setupGatewayInterface()
 	if err != nil {
@@ -257,6 +273,10 @@ func (i *Initializer) initInterfaceStore() error {
 		}
 		return intf
 	}
+	parseMCTunnelInterfaceFunc := func(port *ovsconfig.OVSPortData, ovsPort *interfacestore.OVSPortConfig) *interfacestore.InterfaceConfig {
+		intf := mcroute.ParseMCTunnelInterfaceConfig(port, ovsPort)
+		return intf
+	}
 	ifaceList := make([]*interfacestore.InterfaceConfig, 0, len(ovsPorts))
 	for index := range ovsPorts {
 		port := &ovsPorts[index]
@@ -276,6 +296,8 @@ func (i *Initializer) initInterfaceStore() error {
 				intf = parseUplinkInterfaceFunc(port, ovsPort)
 			case interfacestore.AntreaTunnel:
 				intf = parseTunnelInterfaceFunc(port, ovsPort)
+			case interfacestore.AntreaMulticlusterTunnel:
+				intf = parseMCTunnelInterfaceFunc(port, ovsPort)
 			case interfacestore.AntreaHost:
 				// Not load the host interface, because it is configured on the OVS bridge port, and we don't need a
 				// specific interface in the interfaceStore.
@@ -757,6 +779,44 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 	return nil
 }
 
+func (i *Initializer) setupMulticlusterTunnelInterface() error {
+	tunnelPortName := defaultMCTunInterfaceName
+	tunnelIface, portExists := i.ifaceStore.GetInterface(tunnelPortName)
+	localIP := i.getTunnelPortLocalIP()
+	localIPStr := ""
+	if localIP != nil {
+		localIPStr = localIP.String()
+	}
+
+	// Enabling UDP checksum can greatly improve the performance for Geneve and
+	// VXLAN tunnels by triggering GRO on the receiver.
+	shouldEnableCsum := i.multiclusterConfig.TunnelType == ovsconfig.VXLANTunnel
+
+	// Check the default multicluster tunnel port.
+	if portExists {
+		if err := i.ovsBridgeClient.DeletePort(tunnelIface.PortUUID); err != nil {
+			klog.Errorf("Failed to remove multicluster tunnel port %s: %v", tunnelPortName, err)
+		} else {
+			klog.Infof("Removed multicluster tunnel port %s with tunnel type: %s", tunnelPortName, tunnelIface.TunnelInterfaceConfig.Type)
+			i.ifaceStore.DeleteInterface(tunnelIface)
+		}
+	}
+
+	tunnelType := ovsconfig.TunnelType(i.multiclusterConfig.TunnelType)
+	externalIDs := map[string]interface{}{
+		interfacestore.AntreaInterfaceTypeKey: interfacestore.AntreaMulticlusterTunnel,
+	}
+	tunnelPortUUID, err := i.ovsBridgeClient.CreateTunnelPortExt(tunnelPortName, tunnelType, config.DefaultMCTunOFPort, shouldEnableCsum, localIPStr, "", "", externalIDs)
+	if err != nil {
+		klog.Errorf("Failed to create multicluster tunnel port %s type %s on OVS bridge: %v", tunnelPortName, tunnelType, err)
+		return err
+	}
+	tunnelIface = interfacestore.NewTunnelInterface(tunnelPortName, tunnelType, localIP, shouldEnableCsum)
+	tunnelIface.OVSPortConfig = &interfacestore.OVSPortConfig{PortUUID: tunnelPortUUID, OFPort: config.DefaultMCTunOFPort}
+	i.ifaceStore.AddInterface(tunnelIface)
+	return nil
+}
+
 func (i *Initializer) enableTunnelCsum(tunnelPortName string) error {
 	options, err := i.ovsBridgeClient.GetInterfaceOptions(tunnelPortName)
 	if err != nil {
@@ -853,7 +913,7 @@ func (i *Initializer) initNodeLocalConfig() error {
 			return err
 		}
 	}
-
+	i.multiclusterConfig.TunnelName = defaultMCTunInterfaceName
 	i.nodeConfig = &config.NodeConfig{
 		Name:                       nodeName,
 		OVSBridge:                  i.ovsBridge,
@@ -866,6 +926,7 @@ func (i *Initializer) initNodeLocalConfig() error {
 		UplinkNetConfig:            new(config.AdapterNetConfig),
 		NodeTransportInterfaceMTU:  transportInterface.MTU,
 		WireGuardConfig:            i.wireGuardConfig,
+		MulticlusterConfig:         i.multiclusterConfig,
 	}
 
 	mtu, err := i.getNodeMTU(transportInterface)

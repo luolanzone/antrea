@@ -1,4 +1,5 @@
 // Copyright 2019 Antrea Authors
+// Copyright 2019 Antrea Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -287,6 +288,8 @@ var (
 	snatPktMarkRange = &binding.Range{0, 7}
 
 	GlobalVirtualMAC, _ = net.ParseMAC("aa:bb:cc:dd:ee:ff")
+
+	GlobalVirtualMACForMulticluster, _ = net.ParseMAC("ff:ee:dd:cc:bb:aa")
 )
 
 type OFEntryOperations interface {
@@ -323,6 +326,7 @@ type client struct {
 	enableEgress          bool
 	enableWireGuard       bool
 	enableMulticast       bool
+	enableMulticluster    bool
 	connectUplinkToBridge bool
 	roundInfo             types.RoundInfo
 	cookieAllocator       cookie.Allocator
@@ -333,6 +337,7 @@ type client struct {
 	featureEgress          *featureEgress
 	featureNetworkPolicy   *featureNetworkPolicy
 	featureMulticast       *featureMulticast
+	featureMulticluster    *featureMulticluster
 	featureTraceflow       *featureTraceflow
 	activeFeatures         []feature
 
@@ -1533,7 +1538,9 @@ func (c *featurePodConnectivity) l3FwdFlowToGateway(category cookie.Category) []
 func (c *featurePodConnectivity) l3FwdFlowToRemoteViaTun(category cookie.Category,
 	localGatewayMAC net.HardwareAddr,
 	peerSubnet net.IPNet,
-	tunnelPeer net.IP) binding.Flow {
+	tunnelPeer net.IP,
+	tunnelRegMark *binding.RegMark,
+	dstMAC net.HardwareAddr) binding.Flow {
 	ipProtocol := getIPProtocol(peerSubnet.IP)
 	// For simplicity, in the following:
 	//   - per-Node IPAM Pod is referred to as Pod.
@@ -1552,10 +1559,10 @@ func (c *featurePodConnectivity) l3FwdFlowToRemoteViaTun(category cookie.Categor
 		Cookie(c.cookieAllocator.Request(category).Raw()).
 		MatchProtocol(ipProtocol).
 		MatchDstIPNet(peerSubnet).
-		Action().SetSrcMAC(localGatewayMAC).  // Rewrite src MAC to local gateway MAC.
-		Action().SetDstMAC(GlobalVirtualMAC). // Rewrite dst MAC to virtual MAC.
-		Action().SetTunnelDst(tunnelPeer).    // Flow based tunnel. Set tunnel destination.
-		Action().LoadRegMark(ToTunnelRegMark).
+		Action().SetSrcMAC(localGatewayMAC). // Rewrite src MAC to local gateway MAC.
+		Action().SetDstMAC(dstMAC).          // Rewrite dst MAC to virtual MAC.
+		Action().SetTunnelDst(tunnelPeer).   // Flow based tunnel. Set tunnel destination.
+		Action().LoadRegMark(tunnelRegMark).
 		Action().GotoTable(L3DecTTLTable.GetID()).
 		Done()
 }
@@ -3130,7 +3137,8 @@ func NewClient(bridgeName string,
 	enableDenyTracking bool,
 	proxyAll bool,
 	connectUplinkToBridge bool,
-	enableMulticast bool) Client {
+	enableMulticast bool,
+	enableMulticluster bool) Client {
 	bridge := binding.NewOFBridge(bridgeName, mgmtAddr)
 	c := &client{
 		bridge:                bridge,
@@ -3140,6 +3148,7 @@ func NewClient(bridgeName string,
 		enableDenyTracking:    enableDenyTracking,
 		enableEgress:          enableEgress,
 		enableMulticast:       enableMulticast,
+		enableMulticluster:    enableMulticluster,
 		connectUplinkToBridge: connectUplinkToBridge,
 		pipelines:             make(map[pipeline]binding.Pipeline),
 		ovsctlClient:          ovsctl.NewClient(bridgeName),
@@ -3574,6 +3583,40 @@ func (c *featureService) gatewayHairpinFlows(category cookie.Category) []binding
 				Action().NextTable().
 				Done(),
 		)
+	}
+	return flows
+}
+
+func (c *featureMulticluster) localClassifierFlows(tunnelOFPort uint32, peerSubnets []net.IPNet) []binding.Flow {
+	var flows []binding.Flow
+	for _, protocol := range c.ipProtocols {
+		for _, peerSubnet := range peerSubnets {
+			flows = append(flows, ClassifierTable.ofTable.BuildFlow(priorityNormal).
+				Cookie(c.cookieAllocator.Request(c.category).Raw()).
+				MatchProtocol(protocol).
+				MatchInPort(tunnelOFPort).
+				MatchDstIPNet(peerSubnet).
+				Action().LoadRegMark(FromMCTunnelRegMark).
+				Action().LoadRegMark(RewriteMACRegMark).
+				Action().GotoTable(ConntrackTable.GetID()).
+				Done())
+		}
+	}
+	return flows
+}
+
+func (c *featureMulticluster) remoteClassifierFlows(tunnelOFPort uint32, peerSubnets []net.IPNet) []binding.Flow {
+	var flows []binding.Flow
+	for _, protocol := range c.ipProtocols {
+		for _, peerSubnet := range peerSubnets {
+			flows = append(flows, ClassifierTable.ofTable.BuildFlow(priorityHigh).
+				Cookie(c.cookieAllocator.Request(c.category).Raw()).
+				MatchProtocol(protocol).
+				MatchInPort(tunnelOFPort).
+				MatchDstIPNet(peerSubnet).
+				Action().GotoTable(ConntrackTable.GetID()).
+				Done())
+		}
 	}
 	return flows
 }

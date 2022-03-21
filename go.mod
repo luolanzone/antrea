@@ -3,8 +3,8 @@ module antrea.io/antrea
 go 1.17
 
 require (
-	antrea.io/libOpenflow v0.6.1
-	antrea.io/ofnet v0.2.3
+	antrea.io/libOpenflow v0.6.2
+	antrea.io/ofnet v0.5.4
 	github.com/Mellanox/sriovnet v1.0.2
 	github.com/Microsoft/go-winio v0.4.16-0.20201130162521-d1ffc52c7331
 	github.com/Microsoft/hcsshim v0.8.9
@@ -41,12 +41,12 @@ require (
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/afero v1.6.0
-	github.com/spf13/cobra v1.1.1
+	github.com/spf13/cobra v1.4.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.0
 	github.com/ti-mo/conntrack v0.4.0
 	github.com/vishvananda/netlink v1.1.1-0.20210510164352-d17758a128bf
-	github.com/vmware/go-ipfix v0.5.11
+	github.com/vmware/go-ipfix v0.5.12
 	go.uber.org/multierr v1.6.0
 	golang.org/x/crypto v0.0.0-20210503195802-e9a32991a82e
 	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6

@@ -39,7 +39,8 @@ import (
 
 var _ = Describe("ServiceExport controller", func() {
 	svcSpec := corev1.ServiceSpec{
-		Ports: svcPorts,
+		ClusterIP: "10.96.11.10",
+		Ports:     svcPorts,
 	}
 
 	svc := &corev1.Service{
@@ -53,7 +54,6 @@ var _ = Describe("ServiceExport controller", func() {
 		Namespace: svc.Namespace,
 		Name:      svc.Name,
 	}
-	epNamespacedName := svcNamespacedName
 
 	ep := &corev1.Endpoints{
 		ObjectMeta: metav1.ObjectMeta{
@@ -108,7 +108,7 @@ var _ = Describe("ServiceExport controller", func() {
 				{
 					Addresses: []corev1.EndpointAddress{
 						{
-							IP: "192.168.17.11",
+							IP: "10.96.11.10",
 						},
 					},
 					Ports: epPorts,
@@ -178,42 +178,6 @@ var _ = Describe("ServiceExport controller", func() {
 		conditions := latestSvcExportNoService.Status.Conditions
 		Expect(len(conditions)).Should(Equal(1))
 		Expect(*conditions[0].Message).Should(Equal("the Service does not exist"))
-	})
-
-	It("Should update existing ResourceExport when corresponding Endpoints has new Endpoint", func() {
-		By("By update an Endpoint with a new address")
-		latestEp := &corev1.Endpoints{}
-		Expect(k8sClient.Get(ctx, epNamespacedName, latestEp)).Should(Succeed())
-		addresses := latestEp.Subsets[0].Addresses
-		addresses = append(addresses, addr3)
-		latestEp.Subsets[0].Addresses = addresses
-		Expect(k8sClient.Update(ctx, latestEp)).Should(Succeed())
-		time.Sleep(2 * time.Second)
-		epResExport := &mcsv1alpha1.ResourceExport{}
-		expectedEpResExport.Spec.Endpoints = &mcsv1alpha1.EndpointsExport{
-			Subsets: []corev1.EndpointSubset{
-				{
-					Addresses: []corev1.EndpointAddress{
-						{
-							IP: "192.168.17.11",
-						},
-						{
-							IP: "192.168.17.13",
-						},
-					},
-					Ports: epPorts,
-				},
-			},
-		}
-
-		var err error
-		Eventually(func() bool {
-			err = k8sClient.Get(ctx, types.NamespacedName{Namespace: LeaderNamespace, Name: epResExportName}, epResExport)
-			return err == nil
-		}, timeout, interval).Should(BeTrue())
-		Expect(epResExport.ObjectMeta.Labels["sourceKind"]).Should(Equal("Endpoints"))
-		Expect(epResExport.Spec).Should(Equal(expectedEpResExport.Spec))
-
 	})
 
 	It("Should delete existing ResourceExport when existing ServiceExport is deleted", func() {

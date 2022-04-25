@@ -230,18 +230,9 @@ func TestServiceExportReconciler_handleServiceUpdateEvent(t *testing.T) {
 		ports:      svcNginx.Spec.Ports,
 		svcType:    string(svcNginx.Spec.Type),
 	}
-	epInfo := &epInfo{
-		name:       epNginx.Name,
-		namespace:  epNginx.Namespace,
-		addressIPs: getEndPointsAddress(epNginx),
-		ports:      getEndPointsPorts(epNginx),
-		labels:     epNginx.Labels,
-	}
 
 	newSvcNginx := svcNginx.DeepCopy()
 	newSvcNginx.Spec.Ports = []corev1.ServicePort{svcPort8080}
-	newEpNginx := epNginx.DeepCopy()
-	newEpNginx.Subsets[0].Ports = epPorts8080
 
 	re := mcsv1alpha1.ResourceExport{
 		ObjectMeta: metav1.ObjectMeta{
@@ -267,13 +258,12 @@ func TestServiceExportReconciler_handleServiceUpdateEvent(t *testing.T) {
 	existEpRe.Name = "cluster-a-default-nginx-endpoints"
 	existEpRe.Spec.Endpoints = &mcsv1alpha1.EndpointsExport{Subsets: epNginxSubset}
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSvcNginx, newEpNginx, existSvcExport).Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSvcNginx, existSvcExport).Build()
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existSvcRe, existEpRe).Build()
 
 	_ = commonarea.NewFakeRemoteCommonArea(scheme, &remoteMgr, fakeRemoteClient, "leader-cluster", "default")
 	r := NewServiceExportReconciler(fakeClient, scheme, &remoteMgr)
 	r.installedSvcs.Add(sinfo)
-	r.installedEps.Add(epInfo)
 	if _, err := r.Reconcile(ctx, req); err != nil {
 		t.Errorf("ServiceExport Reconciler should update ResourceExports but got error = %v", err)
 	} else {
@@ -304,7 +294,7 @@ func TestServiceExportReconciler_handleServiceUpdateEvent(t *testing.T) {
 				{
 					Addresses: []corev1.EndpointAddress{
 						{
-							IP: "192.168.17.11",
+							IP: "192.168.2.3",
 						},
 					},
 					Ports: epPorts8080,

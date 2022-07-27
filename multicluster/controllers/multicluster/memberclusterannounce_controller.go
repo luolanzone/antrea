@@ -24,7 +24,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -99,12 +99,8 @@ func (r *MemberClusterAnnounceReconciler) Reconcile(ctx context.Context, req ctr
 	memberAnnounce := &multiclusterv1alpha1.MemberClusterAnnounce{}
 	err := r.Get(ctx, req.NamespacedName, memberAnnounce)
 	if err != nil {
-		if !errors.IsNotFound(err) {
-			// Cannot read the requested resource. Return error, so reconciliation will be retried.
-			return ctrl.Result{}, err
-		}
 		// If MemberClusterAnnounce is deleted, no need to process because RemoveMember must already
-		// be called.
+		// be called. Return other errors, so reconciliation will be retried.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -114,28 +110,25 @@ func (r *MemberClusterAnnounceReconciler) Reconcile(ctx context.Context, req ctr
 		klog.V(2).InfoS("Reset lastUpdateTime", "cluster", memberAnnounce.ClusterID)
 		// Reset lastUpdateTime and connectedLeader for this member.
 		data.lastUpdateTime = time.Now()
-		if len(memberAnnounce.LeaderClusterID) == 0 {
-			data.leaderStatus.connectedLeader = v1.ConditionUnknown
-			data.leaderStatus.message = "Not connected to leader yet"
-			data.leaderStatus.reason = ""
-		} else {
-			data.leaderStatus.connectedLeader = v1.ConditionFalse
-			data.leaderStatus.message = fmt.Sprintf("Local cluster is not the leader of member: %v",
-				memberAnnounce.ClusterID)
-			data.leaderStatus.reason = ReasonNotLeader
-			// Check whether this local cluster is the leader for this member.
-			clusterClaim := &multiclusterv1alpha2.ClusterClaim{}
-			if err := r.Get(context.TODO(), types.NamespacedName{Name: multiclusterv1alpha2.WellKnownClusterClaimID, Namespace: req.Namespace}, clusterClaim); err == nil {
-				if clusterClaim.Value == memberAnnounce.LeaderClusterID {
-					data.leaderStatus.connectedLeader = v1.ConditionTrue
-					data.leaderStatus.message = fmt.Sprintf("Local cluster is the leader of member: %v",
-						memberAnnounce.ClusterID)
-					data.leaderStatus.reason = ReasonConnectedLeader
-				}
+		data.leaderStatus.connectedLeader = v1.ConditionFalse
+		data.leaderStatus.message = fmt.Sprintf("Local cluster is not the leader of member: %v",
+			memberAnnounce.ClusterID)
+		data.leaderStatus.reason = ReasonNotLeader
+		// Check whether this local cluster is the leader for this member.
+		clusterClaim := &multiclusterv1alpha2.ClusterClaim{}
+		if err := r.Get(context.TODO(), types.NamespacedName{Name: multiclusterv1alpha2.WellKnownClusterClaimID, Namespace: req.Namespace}, clusterClaim); err == nil {
+			if clusterClaim.Value == memberAnnounce.LeaderClusterID {
+				data.leaderStatus.connectedLeader = v1.ConditionTrue
+				data.leaderStatus.message = fmt.Sprintf("Local cluster is the leader of member: %v",
+					memberAnnounce.ClusterID)
+				data.leaderStatus.reason = ReasonConnectedLeader
 			}
-			// If err != nil, probably ClusterClaims were deleted during the processing of MemberClusterAnnounce.
-			// Nothing to handle in this case and MemberClusterAnnounce will also be deleted soon.
-			// TODO: Add ClusterClaim webhook to make sure it cannot be deleted while ClusterSet is present.
+		} else {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			// If it's not found error, ClusterClaims were probably deleted during the processing of MemberClusterAnnounce.
+			// Nothing to handle in this case since it means ClusterSet is deleted as well, no status need to be updated.
 		}
 	}
 	r.mapLock.Unlock()
@@ -237,7 +230,7 @@ func (r *MemberClusterAnnounceReconciler) processMCSStatus() {
 						if condition.Status != v1.ConditionFalse {
 							condition.Status = v1.ConditionFalse
 							condition.LastTransitionTime = metav1.Now()
-							condition.Message = fmt.Sprintf("No MemberClusterAnnounce update after %v", data.lastUpdateTime)
+							condition.Message = fmt.Sprintf("No MemberClusterAnnounce update after %s", data.lastUpdateTime.Format(time.UnixDate))
 							condition.Reason = ReasonDisconnected
 						}
 					}
@@ -245,7 +238,7 @@ func (r *MemberClusterAnnounceReconciler) processMCSStatus() {
 					{
 						if condition.Status != v1.ConditionFalse || condition.Reason != ReasonDisconnected {
 							condition.Status = v1.ConditionFalse
-							condition.Message = fmt.Sprintf("No MemberClusterAnnounce update after %v", data.lastUpdateTime)
+							condition.Message = fmt.Sprintf("No MemberClusterAnnounce update after %s", data.lastUpdateTime.Format(time.UnixDate))
 							condition.LastTransitionTime = metav1.Now()
 							condition.Reason = ReasonDisconnected
 						}
@@ -286,7 +279,7 @@ func (r *MemberClusterAnnounceReconciler) AddMember(memberID common.ClusterID) {
 		Conditions: conditions}
 
 	r.timerData[memberID] = &timerData{connected: false, lastUpdateTime: time.Time{}}
-	klog.InfoS("Added member", "member", memberID)
+	klog.InfoS("Added member cluster", "cluster", memberID)
 }
 
 func (r *MemberClusterAnnounceReconciler) RemoveMember(memberID common.ClusterID) {
@@ -295,7 +288,7 @@ func (r *MemberClusterAnnounceReconciler) RemoveMember(memberID common.ClusterID
 
 	delete(r.memberStatus, memberID)
 	delete(r.timerData, memberID)
-	klog.InfoS("Removed member", "member", memberID)
+	klog.InfoS("Removed member cluster", "cluster", memberID)
 }
 
 func (r *MemberClusterAnnounceReconciler) GetMemberClusterStatuses() []multiclusterv1alpha1.ClusterStatus {

@@ -211,51 +211,11 @@ func TestStatusAfterReconcile(t *testing.T) {
 			Name:      "memberclusterannounce-east",
 			Namespace: "mcs1",
 		},
-		ClusterID:    "east",
-		ClusterSetID: "clusterset1",
+		ClusterID:       "east",
+		ClusterSetID:    "clusterset1",
+		LeaderClusterID: "leader1",
 	}
 	err := mcaTestFakeRemoteClient.Create(context.TODO(), &mca, &client.CreateOptions{})
-	assert.Equal(t, nil, err)
-
-	req := ctrl.Request{
-		NamespacedName: types.NamespacedName{
-			Namespace: "mcs1",
-			Name:      "memberclusterannounce-east",
-		},
-	}
-	memberClusterAnnounceReconcilerUnderTest.Reconcile(context.Background(), req)
-
-	expectedStatus := mcsv1alpha1.ClusterStatus{
-		ClusterID: "east",
-		Conditions: []mcsv1alpha1.ClusterCondition{
-			{
-				Type:   "Ready",
-				Status: "True",
-				Reason: "Connected",
-			},
-			{
-				Type:    "ClusterConnected",
-				Status:  "Unknown",
-				Message: "Not connected to leader yet",
-			},
-		},
-	}
-
-	memberClusterAnnounceReconcilerUnderTest.processMCSStatus()
-	actualStatus := memberClusterAnnounceReconcilerUnderTest.GetMemberClusterStatuses()
-	klog.V(2).InfoS("Received", "actual", actualStatus, "expected", expectedStatus)
-	assert.Equal(t, 1, len(actualStatus))
-	verifyStatus(t, expectedStatus, actualStatus[0])
-}
-
-func TestStatusAfterLeaderElection(t *testing.T) {
-	TestStatusAfterReconcile(t)
-
-	mca := &mcsv1alpha1.MemberClusterAnnounce{}
-	err := mcaTestFakeRemoteClient.Get(context.TODO(), types.NamespacedName{Name: "memberclusterannounce-east", Namespace: "mcs1"}, mca)
-	assert.Equal(t, nil, err)
-	mca.LeaderClusterID = "leader1"
-	err = mcaTestFakeRemoteClient.Update(context.TODO(), mca, &client.UpdateOptions{})
 	assert.Equal(t, nil, err)
 
 	req := ctrl.Request{

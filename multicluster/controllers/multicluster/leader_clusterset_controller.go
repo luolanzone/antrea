@@ -31,6 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	multiclusterv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
@@ -139,9 +140,11 @@ func (r *LeaderClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Req
 // SetupWithManager sets up the controller with the Manager.
 func (r *LeaderClusterSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.runBackgroundTasks()
-
+	// Ignore status update event via GenerationChangedPredicate
+	instance := predicate.GenerationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&multiclusterv1alpha1.ClusterSet{}).
+		WithEventFilter(instance).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: common.DefaultWorkerCount,
 		}).

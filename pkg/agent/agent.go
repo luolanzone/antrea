@@ -105,6 +105,7 @@ type Initializer struct {
 	// networkReadyCh should be closed once the Node's network is ready.
 	// The CNI server will wait for it before handling any CNI Add requests.
 	proxyAll              bool
+	enableMulticluster    bool
 	networkReadyCh        chan<- struct{}
 	stopCh                <-chan struct{}
 	nodeType              config.NodeType
@@ -132,6 +133,7 @@ func NewInitializer(
 	enableProxy bool,
 	proxyAll bool,
 	connectUplinkToBridge bool,
+	enableMulticluster bool,
 ) *Initializer {
 	return &Initializer{
 		ovsBridgeClient:       ovsBridgeClient,
@@ -154,6 +156,7 @@ func NewInitializer(
 		enableProxy:           enableProxy,
 		proxyAll:              proxyAll,
 		connectUplinkToBridge: connectUplinkToBridge,
+		enableMulticluster:    enableMulticluster,
 	}
 }
 
@@ -755,10 +758,12 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 	// It's not necessary for new Linux kernel versions with the following patch:
 	// https://github.com/torvalds/linux/commit/89e5c58fc1e2857ccdaae506fb8bc5fed57ee063.
 	shouldEnableCsum := i.networkConfig.TunnelCsum && (i.networkConfig.TunnelType == ovsconfig.GeneveTunnel || i.networkConfig.TunnelType == ovsconfig.VXLANTunnel)
+	tunnelInterfaceSupported := i.networkConfig.TrafficEncapMode.SupportsEncap() ||
+		(i.networkConfig.TrafficEncapMode.IsNetworkPolicyOnly() && i.enableMulticluster)
 
 	// Check the default tunnel port.
 	if portExists {
-		if i.networkConfig.TrafficEncapMode.SupportsEncap() &&
+		if tunnelInterfaceSupported &&
 			tunnelIface.TunnelInterfaceConfig.Type == i.networkConfig.TunnelType &&
 			tunnelIface.TunnelInterfaceConfig.DestinationPort == i.networkConfig.TunnelPort &&
 			tunnelIface.TunnelInterfaceConfig.LocalIP.Equal(localIP) {
@@ -775,7 +780,7 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 		}
 
 		if err := i.ovsBridgeClient.DeletePort(tunnelIface.PortUUID); err != nil {
-			if i.networkConfig.TrafficEncapMode.SupportsEncap() {
+			if tunnelInterfaceSupported {
 				return fmt.Errorf("failed to remove tunnel port %s with wrong tunnel type: %s", tunnelPortName, err)
 			}
 			klog.Errorf("Failed to remove tunnel port %s in NoEncapMode: %v", tunnelPortName, err)
@@ -786,7 +791,7 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 	}
 
 	// Create the default tunnel port and interface.
-	if i.networkConfig.TrafficEncapMode.SupportsEncap() {
+	if tunnelInterfaceSupported {
 		if tunnelPortName != defaultTunInterfaceName {
 			// Reset the tunnel interface name to the desired name before
 			// recreating the tunnel port and interface.

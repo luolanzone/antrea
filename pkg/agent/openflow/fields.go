@@ -154,6 +154,10 @@ var (
 	// reg9(NXM_NX_REG9)
 	// Field to cache the ofPort of the OVS interface to output traffic control packets.
 	TrafficControlTargetOFPortField = binding.NewRegField(9, 0, 31)
+
+	// reg10(NXM_NX_REG10)
+	// Field to cache the source tunnel IP of incoming tunnel traffic.
+	TunnelSourceIPField = binding.NewRegField(10, 0, 31)
 )
 
 // Fields using xxreg.
@@ -197,4 +201,7 @@ var (
 
 	// Field to store the egress rule ID.
 	EgressRuleCTLabel = binding.NewCTLabel(32, 63)
+
+	// Field to store the source tunnel IP.
+	TunnelSourceIPCTLabel = binding.NewCTLabel(64, 95)
 )

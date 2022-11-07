@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package noderoute
+package multicluster
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/golang/mock/gomock"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 
 	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	mcfake "antrea.io/antrea/multicluster/pkg/client/clientset/versioned/fake"
@@ -46,7 +49,9 @@ func newMCRouteController(t *testing.T, nodeConfig *config.NodeConfig) (*fakeRou
 	mcInformerFactory := mcinformers.NewSharedInformerFactory(mcClient, 60*time.Second)
 	gwInformer := mcInformerFactory.Multicluster().V1alpha1().Gateways()
 	ciImpInformer := mcInformerFactory.Multicluster().V1alpha1().ClusterInfoImports()
-
+	k8sClient := k8sfake.NewSimpleClientset()
+	informerFactory := informers.NewSharedInformerFactory(k8sClient, 60*time.Second)
+	nodeInformer := informerFactory.Core().V1().Nodes()
 	ctrl := gomock.NewController(t)
 	ofClient := oftest.NewMockClient(ctrl)
 	ovsClient := ovsconfigtest.NewMockOVSBridgeClient(ctrl)
@@ -55,11 +60,13 @@ func newMCRouteController(t *testing.T, nodeConfig *config.NodeConfig) (*fakeRou
 		mcClient,
 		gwInformer,
 		ciImpInformer,
+		nodeInformer,
 		ofClient,
 		ovsClient,
 		interfaceStore,
 		nodeConfig,
 		"default",
+		false,
 	)
 	return &fakeRouteController{
 		MCRouteController: c,
@@ -145,7 +152,7 @@ func TestMCRouteControllerAsGateway(t *testing.T) {
 		// Create Gateway1
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway1.GetNamespace()).Create(context.TODO(),
 			&gateway1, metav1.CreateOptions{})
-		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), true).Times(1)
+		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), true, false).Times(1)
 		c.processNextWorkItem()
 
 		// Create two ClusterInfoImports
@@ -174,22 +181,22 @@ func TestMCRouteControllerAsGateway(t *testing.T) {
 		// Delete a ClusterInfoImport
 		c.mcClient.MulticlusterV1alpha1().ClusterInfoImports(clusterInfoImport2.GetNamespace()).Delete(context.TODO(),
 			clusterInfoImport2.Name, metav1.DeleteOptions{})
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport2.Name).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport2.Name)).Times(1)
 		c.processNextWorkItem()
 
 		// Create Gateway2 as active Gateway
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway2.GetNamespace()).Create(context.TODO(),
 			&gateway2, metav1.CreateOptions{})
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport1.Name).Times(1)
-		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport1.Name)).Times(1)
+		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false, false).Times(1)
 		c.ofClient.EXPECT().InstallMulticlusterNodeFlows(clusterInfoImport1.Name, gomock.Any(), gw2InternalIP).Times(1)
 		c.processNextWorkItem()
 
 		// Delete Gateway2, then Gateway1 become active Gateway
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway2.GetNamespace()).Delete(context.TODO(),
 			gateway2.Name, metav1.DeleteOptions{})
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport1.Name).Times(1)
-		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), true).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport1.Name)).Times(1)
+		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), true, false).Times(1)
 		c.ofClient.EXPECT().InstallMulticlusterGatewayFlows(clusterInfoImport1.Name,
 			gomock.Any(), peerNodeIP1, gw1GatewayIP).Times(1)
 		c.processNextWorkItem()
@@ -197,7 +204,7 @@ func TestMCRouteControllerAsGateway(t *testing.T) {
 		// Delete last Gateway
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway1.GetNamespace()).Delete(context.TODO(),
 			gateway1.Name, metav1.DeleteOptions{})
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport1.Name).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport1.Name)).Times(1)
 		c.processNextWorkItem()
 	}()
 	select {
@@ -226,7 +233,7 @@ func TestMCRouteControllerAsRegularNode(t *testing.T) {
 		// Create Gateway1
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway1.GetNamespace()).Create(context.TODO(),
 			&gateway1, metav1.CreateOptions{})
-		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false).Times(1)
+		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false, false).Times(1)
 		c.processNextWorkItem()
 
 		// Create two ClusterInfoImports
@@ -253,22 +260,22 @@ func TestMCRouteControllerAsRegularNode(t *testing.T) {
 		// Delete a ClusterInfoImport
 		c.mcClient.MulticlusterV1alpha1().ClusterInfoImports(clusterInfoImport2.GetNamespace()).Delete(context.TODO(),
 			clusterInfoImport2.Name, metav1.DeleteOptions{})
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport2.Name).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport2.Name)).Times(1)
 		c.processNextWorkItem()
 
 		// Create Gateway2 as the active Gateway
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway2.GetNamespace()).Create(context.TODO(),
 			&gateway2, metav1.CreateOptions{})
-		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false).Times(1)
+		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false, false).Times(1)
 		c.ofClient.EXPECT().InstallMulticlusterNodeFlows(clusterInfoImport1.Name, gomock.Any(), peerNodeIP2).Times(1)
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport1.Name).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport1.Name)).Times(1)
 		c.processNextWorkItem()
 
 		// Delete Gateway2, then Gateway1 become active Gateway
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway2.GetNamespace()).Delete(context.TODO(),
 			gateway2.Name, metav1.DeleteOptions{})
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport1.Name).Times(1)
-		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport1.Name)).Times(1)
+		c.ofClient.EXPECT().InstallMulticlusterClassifierFlows(uint32(1), false, false).Times(1)
 		c.ofClient.EXPECT().InstallMulticlusterNodeFlows(clusterInfoImport1.Name,
 			gomock.Any(), peerNodeIP1).Times(1)
 		c.processNextWorkItem()
@@ -276,7 +283,7 @@ func TestMCRouteControllerAsRegularNode(t *testing.T) {
 		// Delete last Gateway
 		c.mcClient.MulticlusterV1alpha1().Gateways(gateway1.GetNamespace()).Delete(context.TODO(),
 			gateway1.Name, metav1.DeleteOptions{})
-		c.ofClient.EXPECT().UninstallMulticlusterFlows(clusterInfoImport1.Name).Times(1)
+		c.ofClient.EXPECT().UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterInfoImport1.Name)).Times(1)
 		c.processNextWorkItem()
 	}()
 	select {

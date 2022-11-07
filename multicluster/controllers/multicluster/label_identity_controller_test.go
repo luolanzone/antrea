@@ -18,21 +18,23 @@ package multicluster
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
+	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
+	"antrea.io/antrea/multicluster/controllers/multicluster/commonarea"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
-	"antrea.io/antrea/multicluster/controllers/multicluster/commonarea"
 )
 
 const (
@@ -273,6 +275,51 @@ func TestGetNormalizedLabel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			normalizedLabel := getNormalizedLabel(tt.nsLabels, tt.podLabels, tt.namespace)
 			assert.Equal(t, tt.expNormalizedLabel, normalizedLabel)
+		})
+	}
+}
+
+func TestLabelIdentityReconciler_SetupWithManager(t *testing.T) {
+	type fields struct {
+		Client           client.Client
+		Scheme           *runtime.Scheme
+		commonAreaMutex  sync.Mutex
+		commonAreaGetter RemoteCommonAreaGetter
+		remoteCommonArea commonarea.RemoteCommonArea
+		labelMutex       sync.RWMutex
+		labelToPodsCache map[string]sets.String
+		podLabelCache    map[string]string
+		labelQueue       workqueue.RateLimitingInterface
+		localClusterID   string
+	}
+	type args struct {
+		mgr ctrl.Manager
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &LabelIdentityReconciler{
+				Client:           tt.fields.Client,
+				Scheme:           tt.fields.Scheme,
+				commonAreaMutex:  tt.fields.commonAreaMutex,
+				commonAreaGetter: tt.fields.commonAreaGetter,
+				remoteCommonArea: tt.fields.remoteCommonArea,
+				labelMutex:       tt.fields.labelMutex,
+				labelToPodsCache: tt.fields.labelToPodsCache,
+				podLabelCache:    tt.fields.podLabelCache,
+				labelQueue:       tt.fields.labelQueue,
+				localClusterID:   tt.fields.localClusterID,
+			}
+			if err := r.SetupWithManager(tt.args.mgr); (err != nil) != tt.wantErr {
+				t.Errorf("LabelIdentityReconciler.SetupWithManager() error = %v, wantErr %v", err, tt.wantErr)
+			}
 		})
 	}
 }

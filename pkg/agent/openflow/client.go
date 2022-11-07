@@ -338,12 +338,24 @@ type Client interface {
 		tunnelPeerIP net.IP,
 		localGatewayIP net.IP) error
 
-	// InstallMulticlusterClassifierFlows installs flows to classify cross-cluster packets.
-	InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGateway bool) error
+	InstallExtraMulticlusterFlowsForNetworkPolicyOnly(tunnelPeerIPs []net.IP) error
 
-	// UninstallMulticlusterFlows removes cross-cluster flows matching the given clusterID on
+	// InstallMulticlusterLocalForwardingFlows installs flows to handle cross-cluster packets
+	// between Nodes.
+	InstallMulticlusterLocalForwardingFlows(
+		serviceName string,
+		podIP net.IP,
+		tunnelPeerIP net.IP) error
+
+	// InstallMulticlusterClassifierFlows installs flows to classify cross-cluster packets.
+	InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGateway bool, isNetworkPolicyOnly bool) error
+
+	// UninstallMulticlusterFlows removes cross-cluster flows matching the given key on
 	// a regular Node or a Gateway.
-	UninstallMulticlusterFlows(clusterID string) error
+	UninstallMulticlusterFlows(cacheKey string) error
+
+	// UninstallMulticlusterSingleFlow removes corresponding cross-cluster flow with given info.
+	UninstallMulticlusterSingleFlow(podIP net.IP, tunnelPeerIP net.IP) error
 
 	// InstallVMUplinkFlows installs flows to forward packet between uplinkPort and hostPort. On a VM, the
 	// uplink and host internal port are paired directly, and no layer 2/3 forwarding flow is installed.
@@ -1362,6 +1374,20 @@ func (c *client) InstallMulticlusterNodeFlows(clusterID string,
 	return c.modifyFlows(c.featureMulticluster.cachedFlows, cacheKey, flows)
 }
 
+// InstallMulticlusterLocalForwardingFlows installs flows to handle cross-cluster packets between
+// Nodes when the Antrea is running in networkPolicyOnly mode.
+func (c *client) InstallMulticlusterLocalForwardingFlows(
+	serviceName string,
+	podIP net.IP,
+	tunnelPeerIP net.IP) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+	cacheKey := fmt.Sprintf("service_%s", serviceName)
+	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
+
+	return c.modifyFlows(c.featureMulticluster.cachedFlows, cacheKey, c.featureMulticluster.l3FwdFlowToOtherNodesViaTun(localGatewayMAC, podIP, tunnelPeerIP))
+}
+
 // InstallMulticlusterGatewayFlows installs flows to handle cross-cluster packets between Gateways.
 func (c *client) InstallMulticlusterGatewayFlows(clusterID string,
 	peerConfigs map[*net.IPNet]net.IP,
@@ -1384,14 +1410,19 @@ func (c *client) InstallMulticlusterGatewayFlows(clusterID string,
 // InstallMulticlusterClassifierFlows adds the following flows:
 //   - One flow in L2ForwardingCalcTable for the global virtual multicluster MAC 'aa:bb:cc:dd:ee:f0'
 //     to set its target output port as 'antrea-tun0'. This flow will be on both Gateway and regular Node.
+//   - One flow in ClassifierTable for the tunnel traffic if it's networkPolicyOnly mode.
 //   - One flow to match MC virtual MAC 'aa:bb:cc:dd:ee:f0' in ClassifierTable for Gateway only.
 //   - One flow in L2ForwardingOutTable to allow multicluster hairpin traffic for Gateway only.
-func (c *client) InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGateway bool) error {
+func (c *client) InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGateway, isNetworkPolicyOnly bool) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
 	flows := []binding.Flow{
 		c.featurePodConnectivity.l2ForwardCalcFlow(GlobalVirtualMACForMulticluster, tunnelOFPort),
+	}
+
+	if isNetworkPolicyOnly {
+		flows = append(flows, c.featurePodConnectivity.tunnelClassifierFlow(tunnelOFPort))
 	}
 
 	if isGateway {
@@ -1403,9 +1434,27 @@ func (c *client) InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGatew
 	return c.modifyFlows(c.featureMulticluster.cachedFlows, "multicluster-classifier", flows)
 }
 
-func (c *client) UninstallMulticlusterFlows(clusterID string) error {
+func (c *client) InstallExtraMulticlusterFlowsForNetworkPolicyOnly(tunnelPeerIPs []net.IP) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	cacheKey := fmt.Sprintf("cluster_%s", clusterID)
+	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
+	var flows []binding.Flow
+	for _, ip := range tunnelPeerIPs {
+		flows = append(flows, c.featureMulticluster.l3FwdFlowToOtherNodesViaTunForNetworkPolicyOnly(localGatewayMAC, ip)...)
+	}
+	return c.modifyFlows(c.featureMulticluster.cachedFlows, "multicluster-nodes", flows)
+}
+
+func (c *client) UninstallMulticlusterFlows(cacheKey string) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
 	return c.deleteFlows(c.featureMulticluster.cachedFlows, cacheKey)
+}
+
+func (c *client) UninstallMulticlusterSingleFlow(podIP, tunnelPeerIP net.IP) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
+	flow := c.featureMulticluster.l3FwdFlowToOtherNodesViaTun(localGatewayMAC, podIP, tunnelPeerIP)
+	return c.ofEntryOperations.Delete(flow[0])
 }

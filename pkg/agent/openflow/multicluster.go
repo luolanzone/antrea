@@ -15,6 +15,8 @@
 package openflow
 
 import (
+	"encoding/binary"
+	"math/big"
 	"net"
 
 	"antrea.io/antrea/pkg/agent/openflow/cookie"
@@ -80,7 +82,7 @@ func (f *featureMulticluster) l3FwdFlowToRemoteViaTun(
 			Action().SetDstMAC(GlobalVirtualMACForMulticluster). // Rewrite dst MAC to virtual MC MAC.
 			Action().SetTunnelDst(tunnelPeer).                   // Flow based tunnel. Set tunnel destination.
 			Action().LoadRegMark(ToTunnelRegMark).
-			Action().GotoTable(L3DecTTLTable.GetID()).
+			Action().GotoTable(EgressMarkTable.GetID()).
 			Done(),
 		// This generates the flow to forward cross-cluster reply traffic based
 		// on Gateway IP.
@@ -96,6 +98,12 @@ func (f *featureMulticluster) l3FwdFlowToRemoteViaTun(
 			Action().LoadRegMark(ToTunnelRegMark).
 			Action().GotoTable(L3DecTTLTable.GetID()).
 			Done(),
+		EgressMarkTable.ofTable.BuildFlow(priorityHigh).
+			Cookie(cookieID).
+			MatchDstMAC(GlobalVirtualMACForMulticluster).
+			MatchProtocol(ipProtocol).
+			Action().GotoTable(L3DecTTLTable.GetID()).
+			Done(),
 	)
 	return flows
 }
@@ -107,6 +115,7 @@ func (f *featureMulticluster) tunnelClassifierFlow(tunnelOFPort uint32) binding.
 		MatchDstMAC(GlobalVirtualMACForMulticluster).
 		Action().LoadRegMark(FromTunnelRegMark).
 		Action().LoadRegMark(RewriteMACRegMark).
+		Action().Move(binding.NxmFieldTunSrcIPv4, TunnelSourceIPField.GetNXFieldName()).
 		Action().GotoStage(stageConntrackState).
 		Done()
 }
@@ -156,6 +165,66 @@ func (f *featureMulticluster) snatConntrackFlows(serviceCIDR net.IPNet, localGat
 			MatchDstIP(localGatewayIP).
 			Action().CT(false, UnSNATTable.GetNext(), f.snatCtZones[ipProtocol], nil).
 			NAT().
+			CTDone().
+			Done(),
+	)
+	return flows
+}
+
+func (f *featureMulticluster) l3FwdFlowToOtherNodesViaTun(
+	localGatewayMAC net.HardwareAddr,
+	peerPodIP net.IP,
+	tunnelPeer net.IP) []binding.Flow {
+	ipProtocol := getIPProtocol(peerPodIP)
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	var flows []binding.Flow
+	flows = append(flows,
+		// This generates the flow to forward cross-cluster request packets based
+		// on Pod IP.
+		L3ForwardingTable.ofTable.BuildFlow(priorityHigh).
+			Cookie(cookieID).
+			MatchProtocol(ipProtocol).
+			MatchDstIP(peerPodIP).
+			MatchDstMAC(GlobalVirtualMACForMulticluster).
+			Action().SetSrcMAC(localGatewayMAC). // Rewrite src MAC to local gateway MAC.
+			Action().SetTunnelDst(tunnelPeer).   // Flow based tunnel. Set tunnel destination.
+			Action().LoadRegMark(ToTunnelRegMark).
+			Action().GotoTable(L3DecTTLTable.GetID()).
+			Done(),
+	)
+	return flows
+}
+
+func (f *featureMulticluster) l3FwdFlowToOtherNodesViaTunForNetworkPolicyOnly(
+	localGatewayMAC net.HardwareAddr,
+	tunnelPeer net.IP) []binding.Flow {
+	ipProtocol := getIPProtocol(tunnelPeer)
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
+	var flows []binding.Flow
+	tunnelIP2Unit64 := big.NewInt(0).SetBytes(tunnelPeer.To4()).Uint64()
+	flows = append(flows,
+		// This generates the flow to forward cross-cluster reply packets based
+		// on source tunnel IP.
+		L3ForwardingTable.ofTable.BuildFlow(priorityHigh).
+			Cookie(cookieID).
+			MatchProtocol(ipProtocol).
+			MatchCTStateRpl(true).
+			MatchCTStateTrk(true).
+			MatchCTLabelField(0, tunnelIP2Unit64, TunnelSourceIPCTLabel).
+			Action().SetSrcMAC(localGatewayMAC).
+			Action().SetDstMAC(GlobalVirtualMACForMulticluster).
+			Action().SetTunnelDst(tunnelPeer). // Flow based tunnel. Set tunnel destination.
+			Action().LoadRegMark(ToTunnelRegMark).
+			Action().GotoTable(L3DecTTLTable.GetID()).
+			Done(),
+		// This flow saves the source tunnel IP to ct_label[64..95] for cross-cluster traffic.
+		EgressMarkTable.ofTable.BuildFlow(priorityHigh).
+			Cookie(cookieID).
+			MatchProtocol(ipProtocol).
+			MatchDstMAC(GlobalVirtualMACForMulticluster).
+			MatchRegFieldWithValue(TunnelSourceIPField, binary.BigEndian.Uint32(tunnelPeer.To4())).
+			Action().CT(true, L3DecTTLTable.GetID(), f.dnatCtZones[ipProtocol], nil).
+			LoadToLabelField(tunnelIP2Unit64, TunnelSourceIPCTLabel).
 			CTDone().
 			Done(),
 	)

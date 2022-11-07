@@ -23,6 +23,7 @@ import (
 	componentbaseconfig "k8s.io/component-base/config"
 	"k8s.io/klog/v2"
 	aggregatorclientset "k8s.io/kube-aggregator/pkg/client/clientset_generated/clientset"
+	k8smcsclientset "sigs.k8s.io/mcs-api/pkg/client/clientset/versioned"
 
 	mcclientset "antrea.io/antrea/multicluster/pkg/client/clientset/versioned"
 	crdclientset "antrea.io/antrea/pkg/client/clientset/versioned"
@@ -76,7 +77,18 @@ func CreateNetworkAttachDefClient(config componentbaseconfig.ClientConnectionCon
 		return nil, err
 	}
 	return netAttachDefClient, nil
+}
 
+func CreateK8sMCClient(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (k8smcsclientset.Interface, error) {
+	kubeConfig, err := createRestConfig(config, kubeAPIServerOverride)
+	if err != nil {
+		return nil, err
+	}
+	k8smcsclient, err := k8smcsclientset.NewForConfig(kubeConfig)
+	if err != nil {
+		return nil, err
+	}
+	return k8smcsclient, nil
 }
 
 func createRestConfig(config componentbaseconfig.ClientConnectionConfiguration, kubeAPIServerOverride string) (*rest.Config, error) {
@@ -106,5 +118,4 @@ func createRestConfig(config componentbaseconfig.ClientConnectionConfiguration, 
 	kubeConfig.Burst = int(config.Burst)
 
 	return kubeConfig, nil
-
 }

@@ -579,7 +579,7 @@ func TestMulticlusterFlowsInstallation(t *testing.T) {
 	require.Len(t, fCacheI.(flowCache), 2)
 
 	m.EXPECT().DeleteAll(gomock.Any()).Return(nil).Times(1)
-	err = ofClient.UninstallMulticlusterFlows(clusterID)
+	err = ofClient.UninstallMulticlusterFlows(fmt.Sprintf("cluster_%s", clusterID))
 	require.NoError(t, err)
 	_, ok = client.featureMulticluster.cachedFlows.Load(cacheKey)
 	require.False(t, ok)

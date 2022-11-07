@@ -29,6 +29,7 @@ import (
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+	k8smcsinformer "sigs.k8s.io/mcs-api/pkg/client/informers/externalversions"
 
 	mcinformers "antrea.io/antrea/multicluster/pkg/client/informers/externalversions"
 	"antrea.io/antrea/pkg/agent"
@@ -130,10 +131,14 @@ func run(o *Options) error {
 	defer ovsdbConnection.Close()
 
 	egressEnabled := features.DefaultFeatureGate.Enabled(features.Egress)
-	enableAntreaIPAM := features.DefaultFeatureGate.Enabled(features.AntreaIPAM)
-	enableBridgingMode := enableAntreaIPAM && o.config.EnableBridgingMode
+	antreaIPAMEnabled := features.DefaultFeatureGate.Enabled(features.AntreaIPAM)
+	bridgingModeEnabled := antreaIPAMEnabled && o.config.EnableBridgingMode
+	trafficControlEnabled := features.DefaultFeatureGate.Enabled(features.TrafficControl)
+	flowExporterEnabled := features.DefaultFeatureGate.Enabled(features.FlowExporter)
+	antreaPolicyEnabled := features.DefaultFeatureGate.Enabled(features.AntreaPolicy)
+	antreaProxyEnabled := features.DefaultFeatureGate.Enabled(features.AntreaProxy)
 	// Bridging mode will connect the uplink interface to the OVS bridge.
-	connectUplinkToBridge := enableBridgingMode
+	connectUplinkToBridge := bridgingModeEnabled
 	multiclusterEnabled := features.DefaultFeatureGate.Enabled(features.Multicluster) && o.config.Multicluster.Enable
 
 	ovsDatapathType := ovsconfig.OVSDatapathType(o.config.OVSDatapathType)
@@ -141,14 +146,14 @@ func run(o *Options) error {
 	ovsBridgeMgmtAddr := ofconfig.GetMgmtAddress(o.config.OVSRunDir, o.config.OVSBridge)
 	multicastEnabled := features.DefaultFeatureGate.Enabled(features.Multicast)
 	ofClient := openflow.NewClient(o.config.OVSBridge, ovsBridgeMgmtAddr,
-		features.DefaultFeatureGate.Enabled(features.AntreaProxy),
-		features.DefaultFeatureGate.Enabled(features.AntreaPolicy),
+		antreaProxyEnabled,
+		antreaPolicyEnabled,
 		egressEnabled,
-		features.DefaultFeatureGate.Enabled(features.FlowExporter),
+		flowExporterEnabled,
 		o.config.AntreaProxy.ProxyAll,
 		connectUplinkToBridge,
 		multicastEnabled,
-		features.DefaultFeatureGate.Enabled(features.TrafficControl),
+		trafficControlEnabled,
 		multiclusterEnabled,
 	)
 
@@ -247,7 +252,7 @@ func run(o *Options) error {
 		stopCh,
 		o.nodeType,
 		o.config.ExternalNode.ExternalNodeNamespace,
-		features.DefaultFeatureGate.Enabled(features.AntreaProxy),
+		antreaProxyEnabled,
 		o.config.AntreaProxy.ProxyAll,
 		connectUplinkToBridge,
 		multiclusterEnabled)
@@ -282,9 +287,14 @@ func run(o *Options) error {
 	}
 
 	var mcRouteController *mcroute.MCRouteController
+	var routeControllerForNetworkPolicyOnly *mcroute.MCWithPolicyOnlyNodeRouteController
 	var mcInformerFactory mcinformers.SharedInformerFactory
+	var k8smcInformerFactory k8smcsinformer.SharedInformerFactory
+
+	isNetworkPolicyOnly := networkConfig.TrafficEncapMode.IsNetworkPolicyOnly()
 
 	if multiclusterEnabled {
+		klog.InfoS("It's multi-cluster enabled")
 		mcNamespace := env.GetPodNamespace()
 		if o.config.Multicluster.Namespace != "" {
 			mcNamespace = o.config.Multicluster.Namespace
@@ -296,13 +306,36 @@ func run(o *Options) error {
 			mcClient,
 			gwInformer,
 			ciImportInformer,
+			nodeInformer,
 			ofClient,
 			ovsBridgeClient,
 			ifaceStore,
 			nodeConfig,
 			mcNamespace,
+			isNetworkPolicyOnly,
 		)
+
+		if isNetworkPolicyOnly {
+			klog.InfoS("It's NetworkPolicyOnly mode")
+			k8smcClient, err := k8s.CreateK8sMCClient(o.config.ClientConnection, o.config.KubeAPIServerOverride)
+			if err != nil {
+				return fmt.Errorf("error creating K8s multi-cluster client: %v", err)
+			}
+			k8smcInformerFactory = k8smcsinformer.NewSharedInformerFactory(k8smcClient, informerDefaultResync)
+			svcExportInformer := k8smcInformerFactory.Multicluster().V1alpha1().ServiceExports()
+			routeControllerForNetworkPolicyOnly = mcroute.NewMCWithPolicyOnlyNodeRouteController(
+				mcClient,
+				serviceInformer.Informer(),
+				informerFactory.Core().V1().Pods().Informer(),
+				svcExportInformer,
+				ofClient,
+				ovsBridgeClient,
+				ifaceStore,
+				nodeConfig,
+			)
+		}
 	}
+
 	var groupCounters []proxytypes.GroupCounter
 	groupIDUpdates := make(chan string, 100)
 	v4GroupIDAllocator := openflow.NewGroupAllocator(false)
@@ -313,7 +346,7 @@ func run(o *Options) error {
 	v4Enabled := networkConfig.IPv4Enabled
 	v6Enabled := networkConfig.IPv6Enabled
 	var proxier proxy.Proxier
-	if features.DefaultFeatureGate.Enabled(features.AntreaProxy) {
+	if antreaProxyEnabled {
 		proxyAll := o.config.AntreaProxy.ProxyAll
 		skipServices := o.config.AntreaProxy.SkipServices
 		proxyLoadBalancerIPs := *o.config.AntreaProxy.ProxyLoadBalancerIPs
@@ -351,8 +384,6 @@ func run(o *Options) error {
 	// the rule info for populating NetworkPolicy fields in the Flow Exporter even
 	// after rule deletion.
 	asyncRuleDeleteInterval := o.pollInterval
-	antreaPolicyEnabled := features.DefaultFeatureGate.Enabled(features.AntreaPolicy)
-	antreaProxyEnabled := features.DefaultFeatureGate.Enabled(features.AntreaProxy)
 	// In Antrea agent, status manager and audit logging will automatically be enabled
 	// if AntreaPolicy feature is enabled.
 	statusManagerEnabled := antreaPolicyEnabled
@@ -444,7 +475,7 @@ func run(o *Options) error {
 	var localExternalNodeInformer cache.SharedIndexInformer
 	if o.nodeType == config.K8sNode {
 		isChaining := false
-		if networkConfig.TrafficEncapMode.IsNetworkPolicyOnly() {
+		if isNetworkPolicyOnly {
 			isChaining = true
 		}
 		cniServer = cniserver.New(
@@ -454,8 +485,8 @@ func run(o *Options) error {
 			k8sClient,
 			routeClient,
 			isChaining,
-			enableBridgingMode,
-			enableAntreaIPAM,
+			bridgingModeEnabled,
+			antreaIPAMEnabled,
 			o.config.DisableTXChecksumOffload,
 			networkReadyCh)
 
@@ -524,7 +555,7 @@ func run(o *Options) error {
 	}
 
 	var flowExporter *exporter.FlowExporter
-	if features.DefaultFeatureGate.Enabled(features.FlowExporter) {
+	if flowExporterEnabled {
 		flowExporterOptions := &flowexporter.FlowExporterOptions{
 			FlowCollectorAddr:      o.flowCollectorAddr,
 			FlowCollectorProto:     o.flowCollectorProto,
@@ -545,7 +576,7 @@ func run(o *Options) error {
 			serviceCIDRNet,
 			serviceCIDRNetv6,
 			ovsDatapathType,
-			features.DefaultFeatureGate.Enabled(features.AntreaProxy),
+			antreaProxyEnabled,
 			networkPolicyController,
 			flowExporterOptions)
 		if err != nil {
@@ -558,9 +589,9 @@ func run(o *Options) error {
 
 	// Initialize localPodInformer for NPLAgent, AntreaIPAMController, and secondary network controller.
 	var localPodInformer cache.SharedIndexInformer
-	if enableNodePortLocal || enableBridgingMode ||
+	if enableNodePortLocal || bridgingModeEnabled ||
 		features.DefaultFeatureGate.Enabled(features.SecondaryNetwork) ||
-		features.DefaultFeatureGate.Enabled(features.TrafficControl) {
+		trafficControlEnabled {
 		listOptions := func(options *metav1.ListOptions) {
 			options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeConfig.Name).String()
 		}
@@ -615,10 +646,10 @@ func run(o *Options) error {
 	}
 
 	// Antrea IPAM is needed by bridging mode and secondary network IPAM.
-	if enableAntreaIPAM {
+	if antreaIPAMEnabled {
 		ipamController, err := ipam.InitializeAntreaIPAMController(
 			crdClient, informerFactory, crdInformerFactory,
-			localPodInformer, enableBridgingMode)
+			localPodInformer, bridgingModeEnabled)
 		if err != nil {
 			return fmt.Errorf("failed to start Antrea IPAM agent: %v", err)
 		}
@@ -643,7 +674,7 @@ func run(o *Options) error {
 		go podWatchController.Run(stopCh)
 	}
 
-	if features.DefaultFeatureGate.Enabled(features.TrafficControl) {
+	if trafficControlEnabled {
 		tcController := trafficcontrol.NewTrafficControlController(ofClient,
 			ifaceStore,
 			ovsBridgeClient,
@@ -680,7 +711,7 @@ func run(o *Options) error {
 		go traceflowController.Run(stopCh)
 	}
 
-	if features.DefaultFeatureGate.Enabled(features.AntreaProxy) {
+	if antreaProxyEnabled {
 		go proxier.GetProxyProvider().Run(stopCh)
 
 		// If AntreaProxy is configured to proxy all Service traffic, we need to wait for it to sync at least once
@@ -729,6 +760,10 @@ func run(o *Options) error {
 	if multiclusterEnabled {
 		mcInformerFactory.Start(stopCh)
 		go mcRouteController.Run(stopCh)
+		if isNetworkPolicyOnly {
+			k8smcInformerFactory.Start(stopCh)
+			go routeControllerForNetworkPolicyOnly.Run(stopCh)
+		}
 	}
 
 	// statsCollector collects stats and reports to the antrea-controller periodically. For now it's only used for
@@ -784,7 +819,7 @@ func run(o *Options) error {
 	go ofClient.StartPacketInHandler(stopCh)
 
 	// Start the goroutine to periodically export IPFIX flow records.
-	if features.DefaultFeatureGate.Enabled(features.FlowExporter) {
+	if flowExporterEnabled {
 		go flowExporter.Run(stopCh)
 	}
 

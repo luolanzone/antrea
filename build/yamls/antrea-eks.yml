@@ -2891,7 +2891,7 @@ data:
 
     # Enable Antrea Multi-cluster Gateway to support cross-cluster traffic.
     # This feature is supported only with encap mode.
-    #  Multicluster: false
+      Multicluster: true
 
     # Enable support for provisioning secondary network interfaces for Pods (using
     # Pod annotations). At the moment, Antrea can only create secondary network
@@ -3138,7 +3138,7 @@ data:
     multicluster:
     # Enable Antrea Multi-cluster Gateway to support cross-cluster traffic.
     # This feature is supported only with encap mode.
-      enable: false
+      enable: true
     # The Namespace where Antrea Multi-cluster Controller is running.
     # The default is antrea-agent's Namespace.
       namespace: ""
@@ -3599,6 +3599,14 @@ rules:
     - multicluster.crd.antrea.io
     resources:
     - clusterinfoimports
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - multicluster.x-k8s.io
+    resources:
+    - serviceexports
     verbs:
     - get
     - list
@@ -4186,8 +4194,8 @@ spec:
       initContainers:
       containers:
         - name: install-cni
-          image: "antrea/antrea-ubuntu:latest"
-          imagePullPolicy: IfNotPresent
+          image: "shadowlan/cni:antrea"
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 100m
@@ -4220,8 +4228,8 @@ spec:
           - name: host-var-run-antrea
             mountPath: /var/run/antrea
         - name: antrea-agent
-          image: "antrea/antrea-ubuntu:latest"
-          imagePullPolicy: IfNotPresent
+          image: "shadowlan/cni:antrea"
+          imagePullPolicy: Always
           command: ["antrea-agent"]
           # Log to both "/var/log/antrea/" and stderr (so "kubectl logs" can work).-
           args:
@@ -4231,6 +4239,7 @@ spec:
             - "--alsologtostderr"
             - "--log_file_max_size=100"
             - "--log_file_max_num=4"
+            - "--v=4"
           env:
             # Provide pod and node information for clusterinformation CRD.
             - name: POD_NAME
@@ -4314,8 +4323,8 @@ spec:
           - name: xtables-lock
             mountPath: /run/xtables.lock
         - name: antrea-ovs
-          image: "antrea/antrea-ubuntu:latest"
-          imagePullPolicy: IfNotPresent
+          image: "shadowlan/cni:antrea"
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 200m
@@ -4427,8 +4436,8 @@ spec:
       serviceAccountName: antrea-controller
       containers:
         - name: antrea-controller
-          image: "antrea/antrea-ubuntu:latest"
-          imagePullPolicy: IfNotPresent
+          image: "shadowlan/cni:antrea"
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 200m

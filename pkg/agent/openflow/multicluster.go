@@ -98,7 +98,7 @@ func (f *featureMulticluster) l3FwdFlowToRemoteViaTun(
 			Action().LoadRegMark(ToTunnelRegMark).
 			Action().GotoTable(L3DecTTLTable.GetID()).
 			Done(),
-		EgressMarkTable.ofTable.BuildFlow(priorityHigh).
+		EgressMarkTable.ofTable.BuildFlow(priorityNormal).
 			Cookie(cookieID).
 			MatchDstMAC(GlobalVirtualMACForMulticluster).
 			MatchProtocol(ipProtocol).
@@ -210,7 +210,7 @@ func (f *featureMulticluster) l3FwdFlowToOtherNodesViaTunForNetworkPolicyOnly(
 			MatchProtocol(ipProtocol).
 			MatchCTStateRpl(true).
 			MatchCTStateTrk(true).
-			MatchCTLabelField(0, tunnelIP2Unit64, TunnelSourceIPCTLabel).
+			MatchCTLabelField(tunnelIP2Unit64, 0, TunnelSourceIPCTLabel).
 			Action().SetSrcMAC(localGatewayMAC).
 			Action().SetDstMAC(GlobalVirtualMACForMulticluster).
 			Action().SetTunnelDst(tunnelPeer). // Flow based tunnel. Set tunnel destination.

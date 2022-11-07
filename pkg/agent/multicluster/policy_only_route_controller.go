@@ -41,10 +41,6 @@ import (
 	"antrea.io/antrea/pkg/ovs/ovsconfig"
 )
 
-const (
-	emptyLabels = "<none>"
-)
-
 type endpointChangeInfo struct {
 	trigger           endpointChangeEvent
 	labels            string
@@ -57,6 +53,7 @@ type endpointChangeEvent string
 
 const (
 	svcExportDelete endpointChangeEvent = "svcExportDelete"
+	svcExportAdd    endpointChangeEvent = "svcExportAdd"
 	svcAdd          endpointChangeEvent = "svcAdd"
 	svcUpdate       endpointChangeEvent = "svcUpdate"
 	svcDelete       endpointChangeEvent = "svcDelete"
@@ -69,21 +66,21 @@ const (
 // traffic between Nodes inside a member cluster when agent
 // is enabled with networkPolicyOnly mode.
 type MCWithPolicyOnlyNodeRouteController struct {
-	mcClient               mcclientset.Interface
-	ovsBridgeClient        ovsconfig.OVSBridgeClient
-	ofClient               openflow.Client
-	interfaceStore         interfacestore.InterfaceStore
-	nodeConfig             *config.NodeConfig
-	queue                  workqueue.RateLimitingInterface
-	svcInformer            cache.SharedIndexInformer
-	svcLister              corelisters.ServiceLister
-	podInformer            cache.SharedIndexInformer
-	podLister              corelisters.PodLister
-	svcExportInformer      k8smcsinformer.ServiceExportInformer
-	mutex                  sync.RWMutex
-	selectorToService      map[string]types.NamespacedName
-	installedServiceExport map[types.NamespacedName]struct{}
-	isNetworkPolicyOnly    bool
+	mcClient                mcclientset.Interface
+	ovsBridgeClient         ovsconfig.OVSBridgeClient
+	ofClient                openflow.Client
+	interfaceStore          interfacestore.InterfaceStore
+	nodeConfig              *config.NodeConfig
+	queue                   workqueue.RateLimitingInterface
+	svcInformer             cache.SharedIndexInformer
+	svcLister               corelisters.ServiceLister
+	podInformer             cache.SharedIndexInformer
+	podLister               corelisters.PodLister
+	svcExportInformer       k8smcsinformer.ServiceExportInformer
+	mutex                   sync.RWMutex
+	selectorToService       map[string]types.NamespacedName
+	installedServiceExports map[types.NamespacedName]struct{}
+	installedPods           map[types.NamespacedName]struct{}
 }
 
 func NewMCWithPolicyOnlyNodeRouteController(
@@ -97,19 +94,19 @@ func NewMCWithPolicyOnlyNodeRouteController(
 	nodeConfig *config.NodeConfig,
 ) *MCWithPolicyOnlyNodeRouteController {
 	controller := &MCWithPolicyOnlyNodeRouteController{
-		mcClient:               mcClient,
-		ovsBridgeClient:        ovsBridgeClient,
-		ofClient:               client,
-		interfaceStore:         interfaceStore,
-		nodeConfig:             nodeConfig,
-		queue:                  workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "MCWithPolicyOnlyNodeRouteController"),
-		svcInformer:            svcInformer,
-		svcLister:              corelisters.NewServiceLister(svcInformer.GetIndexer()),
-		podInformer:            podInformer,
-		podLister:              corelisters.NewPodLister(podInformer.GetIndexer()),
-		svcExportInformer:      svcExportInformer,
-		selectorToService:      make(map[string]types.NamespacedName),
-		installedServiceExport: make(map[types.NamespacedName]struct{}),
+		mcClient:                mcClient,
+		ovsBridgeClient:         ovsBridgeClient,
+		ofClient:                client,
+		interfaceStore:          interfaceStore,
+		nodeConfig:              nodeConfig,
+		queue:                   workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "MCWithPolicyOnlyNodeRouteController"),
+		svcInformer:             svcInformer,
+		svcLister:               corelisters.NewServiceLister(svcInformer.GetIndexer()),
+		podInformer:             podInformer,
+		podLister:               corelisters.NewPodLister(podInformer.GetIndexer()),
+		svcExportInformer:       svcExportInformer,
+		selectorToService:       make(map[string]types.NamespacedName),
+		installedServiceExports: make(map[types.NamespacedName]struct{}),
 	}
 	controller.svcExportInformer.Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
@@ -138,12 +135,11 @@ func NewMCWithPolicyOnlyNodeRouteController(
 	)
 	controller.podInformer.AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(cur interface{}) {
-				controller.enqueuePod(cur, false)
-			},
+			// Ignore Pod ADD event since there will be no available Pod IP
+			// and host IP when Pod is created.
 			UpdateFunc: controller.enqueuePodUpdate,
 			DeleteFunc: func(old interface{}) {
-				controller.enqueuePod(old, true)
+				controller.enqueuePod(old)
 			},
 		},
 		resyncPeriod,
@@ -156,7 +152,7 @@ func (c *MCWithPolicyOnlyNodeRouteController) initialize() {
 	if err == nil {
 		for _, svcExport := range svcExports {
 			svcNamespacedName := types.NamespacedName{Namespace: svcExport.Namespace, Name: svcExport.Name}
-			c.installedServiceExport[svcNamespacedName] = struct{}{}
+			c.installedServiceExports[svcNamespacedName] = struct{}{}
 			svc, err := c.svcLister.Services(svcExport.Namespace).Get(svcExport.Name)
 			if err != nil || svc.Spec.Selector == nil {
 				continue
@@ -180,14 +176,28 @@ func (c *MCWithPolicyOnlyNodeRouteController) enqueueServiceExport(obj interface
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if isDelete {
-		delete(c.installedServiceExport, svcExportNamespacedName)
+		delete(c.installedServiceExports, svcExportNamespacedName)
 		c.queue.Add(&endpointChangeInfo{
 			trigger:           svcExportDelete,
 			svcNamespacedName: svcExportNamespacedName,
 		})
 		return
 	}
-	c.installedServiceExport[svcExportNamespacedName] = struct{}{}
+	c.installedServiceExports[svcExportNamespacedName] = struct{}{}
+	klog.InfoS("handling svcExportAdd", "service", svcExportNamespacedName)
+	svc, err := c.svcLister.Services(svcExport.Namespace).Get(svcExport.Name)
+	if err != nil {
+		klog.InfoS("enqueueServiceExport ignore service not found error")
+		return
+	}
+	if svc.Spec.Selector == nil {
+		return
+	}
+	c.queue.Add(&endpointChangeInfo{
+		trigger:           svcExportAdd,
+		labels:            labels.FormatLabels(svc.Spec.Selector),
+		svcNamespacedName: svcExportNamespacedName,
+	})
 }
 
 func (c *MCWithPolicyOnlyNodeRouteController) enqueueServiceUpdate(old, cur interface{}) {
@@ -209,7 +219,7 @@ func (c *MCWithPolicyOnlyNodeRouteController) enqueueServiceUpdate(old, cur inte
 	svcNamespacedName := types.NamespacedName{Namespace: curSvc.Namespace, Name: curSvc.Name}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	if _, ok := c.installedServiceExport[svcNamespacedName]; !ok {
+	if _, ok := c.installedServiceExports[svcNamespacedName]; !ok {
 		return
 	}
 
@@ -242,7 +252,7 @@ func (c *MCWithPolicyOnlyNodeRouteController) enqueueService(obj interface{}, is
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	if _, ok := c.installedServiceExport[svcNamespacedName]; !ok {
+	if _, ok := c.installedServiceExports[svcNamespacedName]; !ok {
 		// Return immediately since it's not an exported Service.
 		return
 	}
@@ -281,7 +291,7 @@ func (c *MCWithPolicyOnlyNodeRouteController) matchedService(podLabels map[strin
 	return false, types.NamespacedName{}
 }
 
-func (c *MCWithPolicyOnlyNodeRouteController) enqueuePod(obj interface{}, isDelete bool) {
+func (c *MCWithPolicyOnlyNodeRouteController) enqueuePod(obj interface{}) {
 	pod, isPod := obj.(*corev1.Pod)
 	if !isPod {
 		klog.ErrorS(errors.New("received unexpected object"), "enqueuePod can't process event", "obj", obj)
@@ -289,29 +299,20 @@ func (c *MCWithPolicyOnlyNodeRouteController) enqueuePod(obj interface{}, isDele
 	}
 
 	klog.InfoS("enqueuePod", pod.Namespace+"/"+pod.Name)
-	matched, svc := c.matchedService(pod.Labels)
+	matched, _ := c.matchedService(pod.Labels)
 
 	if !matched {
 		klog.InfoS("Pod doesn't match any Service", "pod", klog.KObj(pod))
 		return
 	}
 
-	if isDelete {
-		c.queue.Add(&endpointChangeInfo{
-			trigger:   podDelete,
-			podNodeIP: pod.Status.HostIP,
-			podIP:     pod.Status.PodIP,
-		})
-		return
-	}
+	klog.InfoS("IPs", "pod.Status.PodIP", pod.Status.PodIP, "pod.Status.HostIP", pod.Status.HostIP, "name", pod.Namespace+"/"+pod.Name)
 
-	if pod.Status.HostIP != "" && pod.Status.PodIP != "" && pod.Spec.NodeName != c.nodeConfig.Name {
-		c.queue.Add(&endpointChangeInfo{
-			svcNamespacedName: svc,
-			podNodeIP:         pod.Status.HostIP,
-			podIP:             pod.Status.PodIP,
-		})
-	}
+	c.queue.Add(&endpointChangeInfo{
+		trigger:   podDelete,
+		podNodeIP: pod.Status.HostIP,
+		podIP:     pod.Status.PodIP,
+	})
 }
 
 func (c *MCWithPolicyOnlyNodeRouteController) enqueuePodUpdate(old, cur interface{}) {
@@ -324,7 +325,7 @@ func (c *MCWithPolicyOnlyNodeRouteController) enqueuePodUpdate(old, cur interfac
 
 	klog.InfoS("enqueuePodUpdate", curPod.Namespace+"/"+curPod.Name)
 
-	if curPod.Spec.HostNetwork || curPod.Spec.NodeName == c.nodeConfig.Name {
+	if curPod.Spec.HostNetwork || curPod.Spec.NodeName == c.nodeConfig.Name || curPod.Spec.NodeName == "" {
 		return
 	}
 
@@ -338,14 +339,29 @@ func (c *MCWithPolicyOnlyNodeRouteController) enqueuePodUpdate(old, cur interfac
 		return
 	}
 
+	podNamespacedName := types.NamespacedName{Namespace: curPod.Namespace, Name: curPod.Name}
+	klog.InfoS("IPs", "oldPod.Status.PodIP", oldPod.Status.PodIP, "curPod.Status.PodIP", curPod.Status.PodIP,
+		"oldPod.Status.HostIP", oldPod.Status.HostIP, "curPod.Status.HostIP", curPod.Status.HostIP,
+		"name", curPod.Name, "namespace", curPod.Namespace)
+
 	if curMatched && oldMatched && oldPod.Status.PodIP == curPod.Status.PodIP &&
 		oldPod.Status.HostIP == curPod.Status.HostIP {
-		klog.V(2).InfoS("Received a Pod update event, "+
-			"but no change impact rules. Skip it", "name", curPod.Name, "namespace", curPod.Namespace)
+		if _, ok := c.installedPods[podNamespacedName]; ok {
+			klog.V(2).InfoS("Received a Pod update event, "+
+				"but no change impact rules. Skip it", "name", curPod.Name, "namespace", curPod.Namespace)
+			return
+		}
+		c.installedPods[podNamespacedName] = struct{}{}
+		c.queue.Add(&endpointChangeInfo{
+			trigger:           podAdd,
+			svcNamespacedName: curMatchedSvc,
+			podNodeIP:         curPod.Status.HostIP,
+			podIP:             curPod.Status.PodIP,
+		})
 		return
 	}
 
-	if oldMatched {
+	if oldMatched && oldPod.Status.PodIP != "" && oldPod.Status.HostIP != "" {
 		c.queue.Add(&endpointChangeInfo{
 			trigger:           podDelete,
 			svcNamespacedName: oldMatchedSvc,
@@ -356,6 +372,7 @@ func (c *MCWithPolicyOnlyNodeRouteController) enqueuePodUpdate(old, cur interfac
 
 	if curMatched && curPod.Status.PodIP != "" && curPod.Status.HostIP != "" {
 		c.queue.Add(&endpointChangeInfo{
+			trigger:           podAdd,
 			svcNamespacedName: curMatchedSvc,
 			podNodeIP:         curPod.Status.HostIP,
 			podIP:             curPod.Status.PodIP,
@@ -432,11 +449,11 @@ func (c *MCWithPolicyOnlyNodeRouteController) syncPodFlows(key *endpointChangeIn
 			klog.ErrorS(err, "Failed to uninstall multi-cluster flows with given Service", "service", svcName)
 			return err
 		}
-	case svcAdd:
+	case svcExportAdd, svcAdd:
 		klog.InfoS("handling svcAdd", "service", key.svcNamespacedName.String())
 		err := c.addPodFlows(key.labels, key)
 		if err != nil {
-			klog.ErrorS(err, "Failed to install local Pod forwarding flows for Service", "service", key.svcNamespacedName.String())
+			klog.ErrorS(err, "Failed to install Pod forwarding flows for Service", "service", key.svcNamespacedName.String())
 			return err
 		}
 	}
@@ -452,6 +469,9 @@ func (c *MCWithPolicyOnlyNodeRouteController) addPodFlows(svcLabels string, key 
 		return err
 	}
 	for _, pod := range pods {
+		if pod.Spec.NodeName == c.nodeConfig.Name {
+			continue
+		}
 		if pod.Status.PodIP != "" && pod.Status.HostIP != "" {
 			if err := c.ofClient.InstallMulticlusterLocalForwardingFlows(key.svcNamespacedName.String(), net.ParseIP(pod.Status.PodIP), net.ParseIP(pod.Status.HostIP)); err != nil {
 				klog.ErrorS(err, "Failed to install multi-cluster local forwarding flows", "podIP", pod.Status.PodIP, "nodeIP", pod.Status.HostIP)

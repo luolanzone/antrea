@@ -212,8 +212,8 @@ github.com/cockroachdb/datadriven v0.0.0-20190809214429-80d97fb3cbaa/go.mod h1:z
 github.com/cockroachdb/datadriven v0.0.0-20200714090401-bf6692d28da5/go.mod h1:h6jFvWxBdQXxjopDMZyH2UVceIRfR84bdzbkoKrsWNo=
 github.com/cockroachdb/errors v1.2.4/go.mod h1:rQD95gz6FARkaKkQXUksEje/d9a6wBJoCr5oaCLELYA=
 github.com/cockroachdb/logtags v0.0.0-20190617123548-eb05cc24525f/go.mod h1:i/u985jwjWRlyHXQbwatDASoW0RMlZ/3i9yJHE2xLkI=
-github.com/confluentinc/bincover v0.1.0 h1:M4Gfj4rCXuUQVe8TqT/VXcAMjLyvN81oDRy79fjSv3o=
-github.com/confluentinc/bincover v0.1.0/go.mod h1:qeI1wx0RxdGTZtrJY0HVlgJ4NqC/X2Z+fHbvy87tgHE=
+github.com/confluentinc/bincover v0.2.0 h1:WSS3MqzwJbosCLMOuF3tJ0pMpALzBfrm80Tb+/3gbQs=
+github.com/confluentinc/bincover v0.2.0/go.mod h1:qeI1wx0RxdGTZtrJY0HVlgJ4NqC/X2Z+fHbvy87tgHE=
 github.com/containerd/cgroups v0.0.0-20190919134610-bf292b21730f/go.mod h1:OApqhQ4XNSNC13gXIwDjhOQxjWa/NxkwZXJ1EvqT0ko=
 github.com/containerd/cgroups v0.0.0-20200531161412-0dbf7f05ba59 h1:qWj4qVYZ95vLWwqyNJCQg7rDsG5wPdze0UaPolH7DUk=
 github.com/containerd/cgroups v0.0.0-20200531161412-0dbf7f05ba59/go.mod h1:pA0z1pT8KYB3TCXK/ocprsh7MAkoW8bZVzPdih9snmM=

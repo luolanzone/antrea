@@ -18,7 +18,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.27.4
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/cheggaaa/pb/v3 v3.1.0
-	github.com/confluentinc/bincover v0.1.0
+	github.com/confluentinc/bincover v0.2.0
 	github.com/containernetworking/cni v0.8.1
 	github.com/containernetworking/plugins v0.8.7
 	github.com/coreos/go-iptables v0.6.0

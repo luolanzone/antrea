@@ -481,6 +481,7 @@ func (p *proxier) installServices() {
 				} else {
 					// If the type of the Service is ClusterIP, install a group according to internalTrafficPolicy.
 					groupID := p.groupCounter.AllocateIfNotExist(svcPortName, internalPolicyLocal)
+					klog.InfoS("the installed groupID is", "groupid", groupID)
 					if err = p.ofClient.InstallServiceGroup(groupID, affinityTimeout != 0, mcsLocalService, allReachableEndpoints); err != nil {
 						klog.ErrorS(err, "Error when installing Group of Endpoints for Service", "Service", svcPortName)
 						continue
@@ -497,6 +498,7 @@ func (p *proxier) installServices() {
 				// internalPolicyLocal.
 				bothPolicyLocal := internalPolicyLocal
 				groupID := p.groupCounter.AllocateIfNotExist(svcPortName, bothPolicyLocal)
+				klog.InfoS("the 2 installed groupID is", "groupid", groupID)
 				if err = p.ofClient.InstallServiceGroup(groupID, affinityTimeout != 0, mcsLocalService, allReachableEndpoints); err != nil {
 					klog.ErrorS(err, "Error when installing Group of local Endpoints for Service", "Service", svcPortName)
 					continue
@@ -557,6 +559,7 @@ func (p *proxier) installServices() {
 
 			// Install ClusterIP flows for the Service.
 			groupID := p.groupCounter.AllocateIfNotExist(svcPortName, internalPolicyLocal)
+			klog.InfoS("the groupID is", "groupid", groupID)
 			if err := p.ofClient.InstallServiceFlows(groupID, svcInfo.ClusterIP(), uint16(svcInfo.Port()), svcInfo.OFProtocol, uint16(affinityTimeout), externalPolicyLocal, corev1.ServiceTypeClusterIP); err != nil {
 				klog.Errorf("Error when installing Service flows: %v", err)
 				continue

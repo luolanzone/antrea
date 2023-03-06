@@ -564,6 +564,7 @@ func (b *OFBridge) AddOFEntriesInBundle(addEntries []OFEntry, modEntries []OFEnt
 	tx := b.ofSwitch.NewTransaction(ofctrl.Ordered)
 	// Open a bundle on the OFSwitch.
 	if err := tx.Begin(); err != nil {
+		klog.ErrorS(err, "err is not empty")
 		return err
 	}
 
@@ -575,6 +576,7 @@ func (b *OFBridge) AddOFEntriesInBundle(addEntries []OFEntry, modEntries []OFEnt
 		for _, e := range entrySet {
 			messages, err := e.entry.GetBundleMessages(e.operation)
 			if err != nil {
+				klog.ErrorS(err, "GetBundleMessages upperr is not empty")
 				return err
 			}
 			sentMessages += len(messages)
@@ -589,6 +591,7 @@ func (b *OFBridge) AddOFEntriesInBundle(addEntries []OFEntry, modEntries []OFEnt
 					if err == nil {
 						tx.Abort()
 					}
+					klog.ErrorS(err, "AddMessage upperr is not empty")
 					return err
 				}
 			}
@@ -603,6 +606,7 @@ func (b *OFBridge) AddOFEntriesInBundle(addEntries []OFEntry, modEntries []OFEnt
 		groupSet, flowSet,
 	} {
 		if err := addMessage(entries); err != nil {
+			klog.ErrorS(err, "AddMessage1 upperr is not empty")
 			return nil
 		}
 	}

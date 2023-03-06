@@ -1036,6 +1036,16 @@ func TestBundleWithGroupInsertBucket(t *testing.T) {
 	err = bridge.AddOFEntriesInBundle(nil, []binding.OFEntry{group}, nil)
 	require.Nil(t, err)
 	CheckGroupExists(t, ovsCtlClient, groupID, "select", expectedGroupBuckets, true)
+
+	groupID5 := binding.GroupIDType(5)
+	group5 := bridge.CreateGroup(groupID5)
+	group5 = group5.Bucket().Weight(100).
+		Group(uint32(groupID)).
+		Done()
+	expectedGroupBuckets = []string{"weight:100,actions=group:4"}
+	err = bridge.AddOFEntriesInBundle(nil, []binding.OFEntry{group5}, nil)
+	require.Nil(t, err)
+	CheckGroupExists(t, ovsCtlClient, groupID5, "select", expectedGroupBuckets, true)
 }
 
 func prepareFlows(table binding.Table) ([]binding.Flow, []*ExpectFlow) {

@@ -34,6 +34,7 @@ import (
 
 	agentconfig "antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/openflow"
+	openflowtypes "antrea.io/antrea/pkg/agent/openflow/types"
 	"antrea.io/antrea/pkg/agent/proxy/metrics"
 	"antrea.io/antrea/pkg/agent/proxy/types"
 	"antrea.io/antrea/pkg/agent/route"
@@ -119,6 +120,7 @@ type proxier struct {
 	endpointSliceEnabled      bool
 	proxyLoadBalancerIPs      bool
 	topologyAwareHintsEnabled bool
+	nestedIPSupport           bool
 }
 
 func (p *proxier) SyncedOnce() bool {
@@ -443,8 +445,12 @@ func (p *proxier) installServices() {
 		}
 
 		if needUpdateEndpoints {
+			var mcsLocalService *openflowtypes.ServiceGroupInfo
+			if p.nestedIPSupport {
+				mcsLocalService = p.checkClusterIPEndpoint(allReachableEndpoints)
+			}
 			// Install Endpoints.
-			err := p.ofClient.InstallEndpointFlows(svcInfo.OFProtocol, allReachableEndpoints)
+			err := p.ofClient.InstallEndpointFlows(svcInfo.OFProtocol, allReachableEndpoints, mcsLocalService)
 			if err != nil {
 				klog.ErrorS(err, "Error when installing Endpoints flows")
 				continue
@@ -592,6 +598,23 @@ func (p *proxier) installServices() {
 		p.serviceInstalledMap[svcPortName] = svcPort
 		p.addServiceByIP(svcInfo.String(), svcPortName)
 	}
+}
+
+func (p *proxier) checkClusterIPEndpoint(endpoints []k8sproxy.Endpoint) *openflowtypes.ServiceGroupInfo {
+	for _, endpoint := range endpoints {
+		for svcPN, svc := range p.serviceMap {
+			if svc.ClusterIP().Equal(net.ParseIP(endpoint.IP())) {
+				groupID, exists := p.groupCounter.Get(svcPN, false)
+				if exists {
+					return &openflowtypes.ServiceGroupInfo{
+						GroupID:  groupID,
+						Endpoint: endpoint,
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // syncProxyRules applies current changes in change trackers and then updates
@@ -898,7 +921,8 @@ func NewProxier(
 	proxyAllEnabled bool,
 	skipServices []string,
 	proxyLoadBalancerIPs bool,
-	groupCounter types.GroupCounter) *proxier {
+	groupCounter types.GroupCounter,
+	nestedIPSupport bool) *proxier {
 	recorder := record.NewBroadcaster().NewRecorder(
 		runtime.NewScheme(),
 		corev1.EventSource{Component: componentName, Host: hostname},
@@ -947,6 +971,7 @@ func NewProxier(
 		serviceHealthServer:       serviceHealthServer,
 		numLocalEndpoints:         map[apimachinerytypes.NamespacedName]int{},
 	}
+	p.nestedIPSupport = true
 
 	p.serviceConfig.RegisterEventHandler(p)
 	p.endpointsConfig.RegisterEventHandler(p)

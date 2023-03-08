@@ -27,6 +27,7 @@ import (
 
 	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/openflow/cookie"
+	openflowtypes "antrea.io/antrea/pkg/agent/openflow/types"
 	"antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/agent/util"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha2"
@@ -92,7 +93,7 @@ type Client interface {
 	// InstallEndpointFlows installs flows for accessing Endpoints.
 	// If an Endpoint is on the current Node, then flows for hairpin and endpoint
 	// L2 forwarding should also be installed.
-	InstallEndpointFlows(protocol binding.Protocol, endpoints []proxy.Endpoint) error
+	InstallEndpointFlows(protocol binding.Protocol, endpoints []proxy.Endpoint, mcsLocalService *openflowtypes.ServiceGroupInfo) error
 	// UninstallEndpointFlows removes flows of the Endpoint installed by
 	// InstallEndpointFlows.
 	UninstallEndpointFlows(protocol binding.Protocol, endpoint proxy.Endpoint) error
@@ -658,7 +659,7 @@ func generateServicePortFlowCacheKey(svcIP net.IP, svcPort uint16, protocol bind
 	return fmt.Sprintf("S%s%s%x", svcIP, protocol, svcPort)
 }
 
-func (c *client) InstallEndpointFlows(protocol binding.Protocol, endpoints []proxy.Endpoint) error {
+func (c *client) InstallEndpointFlows(protocol binding.Protocol, endpoints []proxy.Endpoint, mcsLocalService *openflowtypes.ServiceGroupInfo) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
@@ -670,7 +671,11 @@ func (c *client) InstallEndpointFlows(protocol binding.Protocol, endpoints []pro
 		endpointIP := net.ParseIP(endpoint.IP())
 		portVal := util.PortToUint16(endpointPort)
 		cacheKey := generateEndpointFlowCacheKey(endpoint.IP(), endpointPort, protocol)
-		flows = append(flows, c.featureService.endpointDNATFlow(endpointIP, portVal, protocol))
+		if mcsLocalService != nil && endpoint.IP() == mcsLocalService.Endpoint.IP() {
+			flows = append(flows, c.featureService.endpointDNATFlow(endpointIP, portVal, protocol, mcsLocalService.GroupID))
+		} else {
+			flows = append(flows, c.featureService.endpointDNATFlow(endpointIP, portVal, protocol, 0))
+		}
 		if endpoint.GetIsLocal() {
 			flows = append(flows, c.featureService.podHairpinSNATFlow(endpointIP))
 		}

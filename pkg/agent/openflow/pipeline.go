@@ -2411,7 +2411,7 @@ func (f *featureService) serviceLBFlow(groupID binding.GroupIDType,
 
 // endpointDNATFlow generates the flow which transforms the Service Cluster IP to the Endpoint IP according to the Endpoint
 // selection decision which is stored in regs.
-func (f *featureService) endpointDNATFlow(endpointIP net.IP, endpointPort uint16, protocol binding.Protocol) binding.Flow {
+func (f *featureService) endpointDNATFlow(endpointIP net.IP, endpointPort uint16, protocol binding.Protocol, groupID binding.GroupIDType) binding.Flow {
 	unionVal := (EpSelectedRegMark.GetValue() << EndpointPortField.GetRange().Length()) + uint32(endpointPort)
 	flowBuilder := EndpointDNATTable.ofTable.BuildFlow(priorityNormal).
 		MatchProtocol(protocol).
@@ -2427,16 +2427,20 @@ func (f *featureService) endpointDNATFlow(endpointIP net.IP, endpointPort uint16
 		flowBuilder = flowBuilder.MatchXXReg(EndpointIP6Field.GetRegID(), ipVal)
 	}
 
-	return flowBuilder.Action().
-		CT(true, EndpointDNATTable.GetNext(), f.dnatCtZones[ipProtocol], f.ctZoneSrcField).
-		DNAT(
-			&binding.IPRange{StartIP: endpointIP, EndIP: endpointIP},
-			&binding.PortRange{StartPort: endpointPort, EndPort: endpointPort},
-		).
-		LoadToCtMark(ServiceCTMark).
-		MoveToCtMarkField(PktSourceField, ConnSourceCTMarkField).
-		CTDone().
-		Done()
+	if groupID != 0 {
+		return flowBuilder.Action().Group(groupID).Done()
+	} else {
+		return flowBuilder.Action().
+			CT(true, EndpointDNATTable.GetNext(), f.dnatCtZones[ipProtocol], f.ctZoneSrcField).
+			DNAT(
+				&binding.IPRange{StartIP: endpointIP, EndIP: endpointIP},
+				&binding.PortRange{StartPort: endpointPort, EndPort: endpointPort},
+			).
+			LoadToCtMark(ServiceCTMark).
+			MoveToCtMarkField(PktSourceField, ConnSourceCTMarkField).
+			CTDone().
+			Done()
+	}
 }
 
 // serviceEndpointGroup creates/modifies the group/buckets of Endpoints. If the withSessionAffinity is true, then buckets

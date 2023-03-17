@@ -333,6 +333,10 @@ func run(o *Options) error {
 		if !networkConfig.IPv4Enabled {
 			return fmt.Errorf("Antrea Mutli-cluster doesn't not support IPv6 only cluster")
 		}
+		_, multiclusterEncryptionMode := config.GetTrafficEncryptionModeFromStr(o.config.Multicluster.TrafficEncryptionMode)
+		if multiclusterEncryptionMode == config.TrafficEncryptionModeWireGuard && encryptionMode != config.TrafficEncryptionModeNone {
+			return fmt.Errorf("Antrea Multi-cluster WireGuard does not support in-cluster encryption mode %s", o.config.TrafficEncryptionMode)
+		}
 
 		mcInformerFactoryWithNamespaceOption = mcinformers.NewSharedInformerFactoryWithOptions(mcClient,
 			informerDefaultResync,
@@ -346,8 +350,9 @@ func run(o *Options) error {
 			ciImportInformer,
 			ofClient,
 			nodeConfig,
-			o.config.Multicluster.EnableStretchedNetworkPolicy,
-			o.config.Multicluster.EnablePodToPodConnectivity,
+			networkConfig,
+			routeClient,
+			o.config.Multicluster,
 		)
 		if networkConfig.TrafficEncapMode != config.TrafficEncapModeEncap {
 			mcPodRouteController = mcroute.NewMCPodRouteController(

@@ -1573,6 +1573,16 @@ func (c *Client) deleteNodeIP(podCIDR *net.IPNet) error {
 	return nil
 }
 
+func (c *Client) AddRouteForLink(cidr *net.IPNet, linkIndex int) error {
+	route := &netlink.Route{
+		Scope:     netlink.SCOPE_LINK,
+		Dst:       cidr,
+		LinkIndex: linkIndex,
+	}
+
+	return c.netlink.RouteReplace(route)
+}
+
 func getTransProtocolStr(protocol binding.Protocol) string {
 	if protocol == binding.ProtocolTCP || protocol == binding.ProtocolTCPv6 {
 		return "tcp"

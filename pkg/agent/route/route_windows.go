@@ -419,3 +419,7 @@ func (c *Client) AddLocalAntreaFlexibleIPAMPodRule(podAddresses []net.IP) error 
 func (c *Client) DeleteLocalAntreaFlexibleIPAMPodRule(podAddresses []net.IP) error {
 	return nil
 }
+
+func (c *Client) AddRouteForLink(dstCIDR *net.IPNet, linkIndex int) error {
+	return nil
+}

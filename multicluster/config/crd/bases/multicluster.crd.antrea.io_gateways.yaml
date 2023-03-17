@@ -53,6 +53,12 @@ spec:
           serviceCIDR:
             description: Service CIDR of the local member cluster.
             type: string
+          wireGuard:
+            description: Public key of the WireGuard tunnel.
+            properties:
+              publicKey:
+                type: string
+            type: object
         type: object
     served: true
     storage: true

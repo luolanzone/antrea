@@ -387,6 +387,12 @@ spec:
                   serviceCIDR:
                     description: ServiceCIDR is the IP ranges used by Service ClusterIP.
                     type: string
+                  wireGuard:
+                    description: WireGuard has information of WireGuard tunnel.
+                    properties:
+                      publicKey:
+                        type: string
+                    type: object
                 type: object
               clusterNetworkPolicy:
                 description: If exported resource is AntreaClusterNetworkPolicy.
@@ -3079,6 +3085,12 @@ spec:
                   serviceCIDR:
                     description: ServiceCIDR is the IP ranges used by Service ClusterIP.
                     type: string
+                  wireGuard:
+                    description: WireGuard has information of WireGuard tunnel.
+                    properties:
+                      publicKey:
+                        type: string
+                    type: object
                 type: object
               clusternetworkpolicy:
                 description: If imported resource is AntreaClusterNetworkPolicy.

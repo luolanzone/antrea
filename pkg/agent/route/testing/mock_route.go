@@ -106,6 +106,20 @@ func (mr *MockInterfaceMockRecorder) AddNodePort(arg0, arg1, arg2 interface{}) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddNodePort", reflect.TypeOf((*MockInterface)(nil).AddNodePort), arg0, arg1, arg2)
 }
 
+// AddRouteForLink mocks base method
+func (m *MockInterface) AddRouteForLink(arg0 *net.IPNet, arg1 int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddRouteForLink", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddRouteForLink indicates an expected call of AddRouteForLink
+func (mr *MockInterfaceMockRecorder) AddRouteForLink(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRouteForLink", reflect.TypeOf((*MockInterface)(nil).AddRouteForLink), arg0, arg1)
+}
+
 // AddRoutes mocks base method
 func (m *MockInterface) AddRoutes(arg0 *net.IPNet, arg1 string, arg2, arg3 net.IP) error {
 	m.ctrl.T.Helper()

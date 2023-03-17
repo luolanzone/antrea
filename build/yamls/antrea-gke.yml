@@ -3242,6 +3242,16 @@ data:
       enableStretchedNetworkPolicy: false
     # Enable Pod to Pod connectivity.
       enablePodToPodConnectivity: false
+    # Determines how cross-cluster traffic is encrypted.
+    # It has the following options:
+    # - none (default):  cross-cluster traffic will not be encrypted.
+    # - wireGuard:       use WireGuard to encrypt traffic.
+      trafficEncryptionMode: "none"
+    # WireGuard tunnel configuration for cross-cluster traffic.
+    # It only works when multicluster.trafficEncryptionMode is wireGuard.
+      wireGuard:
+        # WireGuard tunnel port for cross-cluster traffic.
+        port: 51821
   antrea-cni.conflist: |
     {
         "cniVersion":"0.3.0",
@@ -3720,6 +3730,7 @@ rules:
     - get
     - list
     - watch
+    - patch
   - apiGroups:
     - multicluster.crd.antrea.io
     resources:
@@ -4299,7 +4310,7 @@ spec:
         kubectl.kubernetes.io/default-container: antrea-agent
         # Automatically restart Pods with a RollingUpdate if the ConfigMap changes
         # See https://helm.sh/docs/howto/charts_tips_and_tricks/#automatically-roll-deployments
-        checksum/config: d259115de8dc77cc70fa311cc8770631c67cc2ae23fd4ca673cba8328ac6ea0c
+        checksum/config: c5313eef589c81f9bf0bd481dd2e12bcf939a0caeeb8c82b949a1c9cb2a34fe2
       labels:
         app: antrea
         component: antrea-agent
@@ -4538,7 +4549,7 @@ spec:
       annotations:
         # Automatically restart Pod if the ConfigMap changes
         # See https://helm.sh/docs/howto/charts_tips_and_tricks/#automatically-roll-deployments
-        checksum/config: d259115de8dc77cc70fa311cc8770631c67cc2ae23fd4ca673cba8328ac6ea0c
+        checksum/config: c5313eef589c81f9bf0bd481dd2e12bcf939a0caeeb8c82b949a1c9cb2a34fe2
       labels:
         app: antrea
         component: antrea-controller

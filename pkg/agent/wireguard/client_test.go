@@ -23,16 +23,12 @@ import (
 	"sync"
 	"testing"
 
+	"antrea.io/antrea/pkg/agent/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-
-	"antrea.io/antrea/pkg/agent/config"
 )
 
 type fakeWireGuardClient struct {
@@ -385,8 +381,7 @@ func Test_DeletePeer(t *testing.T) {
 }
 
 func Test_New(t *testing.T) {
-	client := fake.NewSimpleClientset()
-	_, err := New(client, &config.NodeConfig{Name: "test"}, &config.WireGuardConfig{})
+	_, err := New(&config.NodeConfig{Name: "test"}, &config.WireGuardConfig{})
 	require.NoError(t, err)
 }
 
@@ -397,6 +392,8 @@ func Test_Init(t *testing.T) {
 		lindSetupErr  error
 		utilConfigErr error
 		expectedErr   string
+		extraIPv4     net.IP
+		extraIPv6     net.IP
 	}{
 		{
 			name: "init successfully",
@@ -421,14 +418,17 @@ func Test_Init(t *testing.T) {
 			utilConfigErr: errors.New("link address config failed"),
 			expectedErr:   "link address config failed",
 		},
+		{
+			name:      "init successfully with provided IPv4 address",
+			extraIPv4: net.ParseIP("192.168.0.0"),
+		},
+		{
+			name:      "init successfully with provided IPv6 address",
+			extraIPv6: net.ParseIP("0000:0000:0000:0000:0000:0000:0000:0000"),
+		},
 	}
 
 	client := getFakeClient()
-	client.k8sClient = fake.NewSimpleClientset(&corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "fake-node-1",
-		},
-	})
 	client.gatewayConfig = &config.GatewayConfig{
 		IPv4: net.ParseIP("192.168.0.2"),
 		IPv6: net.ParseIP("fd12:ab:34:a001::11"),
@@ -446,7 +446,7 @@ func Test_Init(t *testing.T) {
 				return tt.utilConfigErr
 			}
 
-			err := client.Init()
+			_, err := client.Init(tt.extraIPv4, tt.extraIPv6)
 			if tt.expectedErr != "" {
 				assert.Equal(t, tt.expectedErr, err.Error())
 			} else {

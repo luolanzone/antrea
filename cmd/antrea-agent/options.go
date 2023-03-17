@@ -178,6 +178,9 @@ func (o *Options) setDefaults() {
 	} else {
 		o.setExternalNodeDefaultOptions()
 	}
+	if o.config.Multicluster.EnableGateway {
+		o.setMulticlusterDefaultOptions()
+	}
 }
 
 func (o *Options) validateTLSOptions() error {
@@ -616,5 +619,14 @@ func (o *Options) setExternalNodeDefaultOptions() {
 	}
 	if o.config.ExternalNode.ExternalNodeNamespace == "" {
 		o.config.ExternalNode.ExternalNodeNamespace = "default"
+	}
+}
+
+func (o *Options) setMulticlusterDefaultOptions() {
+	_, trafficEncryptionModeType := config.GetTrafficEncryptionModeFromStr(o.config.Multicluster.TrafficEncryptionMode)
+	if trafficEncryptionModeType == config.TrafficEncryptionModeWireGuard {
+		if o.config.Multicluster.WireGuard.Port == 0 {
+			o.config.Multicluster.WireGuard.Port = apis.MulticlusterWireGuardListenPort
+		}
 	}
 }

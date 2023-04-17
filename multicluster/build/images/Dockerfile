@@ -1,4 +1,4 @@
-# Copyright 2022 Antrea Authors
+# Copyright 2023 Antrea Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,24 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG GO_VERSION
-FROM golang:${GO_VERSION} as antrea-build
-
-WORKDIR /antrea
-
-COPY go.mod /antrea/go.mod
-
-RUN go mod download
-
-COPY . /antrea
-
-RUN cd multicluster && make antrea-mc-instr-binary
-
 FROM gcr.io/distroless/static:nonroot
 
 LABEL maintainer="Antrea <projectantrea-dev@googlegroups.com>"
-LABEL description="The Docker image to deploy the Antrea Multi-cluster Controller with code coverage measurement enabled (used for testing)."
+LABEL description="The Docker image to deploy the Antrea Multicluster controller."
 
 USER root
 
-COPY --from=antrea-build /antrea/multicluster/bin/antrea-mc-controller-coverage /
+COPY multicluster/bin/antrea-mc-controller /

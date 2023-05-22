@@ -220,64 +220,37 @@ fine-grained access control.
 
 #### Initialize ClusterSet
 
-In all clusters, a `ClusterSet` CR must be created to define the ClusterSet, and
-two `ClusterClaim` CRs must be created to claim the ClusterSet and claim the
+In all clusters, a `ClusterSet` CR must be created to define the ClusterSet, and claim the
 cluster is a member of the ClusterSet.
 
-- Create `ClusterClaim` and `ClusterSet` in the leader cluster
-`test-cluster-north` with the following YAML manifest (you can also refer to
-[leader-clusterset-template.yml](../../multicluster/config/samples/clusterset_init/leader-clusterset-template.yml)):
+- Create `ClusterSet` in the leader cluster `test-cluster-north` with the following YAML
+  manifest (you can also refer to [leader-clusterset-template.yml](../../multicluster/config/samples/clusterset_init/leader-clusterset-template.yml)):
 
 ```yaml
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: id.k8s.io
-  namespace: antrea-multicluster
-value: test-cluster-north
----
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: clusterset.k8s.io
-  namespace: antrea-multicluster
-value: test-clusterset
----
 apiVersion: multicluster.crd.antrea.io/v1alpha1
 kind: ClusterSet
 metadata:
   name: test-clusterset
   namespace: antrea-multicluster
 spec:
+  clusterID: test-cluster-north
+  clusterSetID: test-clusterset
   leaders:
     - clusterID: test-cluster-north
 ```
 
-- Create `ClusterClaim` and `ClusterSet` in member cluster `test-cluster-east`
-with the following YAML manifest (you can also refer to
-[member-clusterset-template.yml](../../multicluster/config/samples/clusterset_init/member-clusterset-template.yml)):
+- Create `ClusterSet` in member cluster `test-cluster-east` with the following
+YAML manifest (you can also refer to [member-clusterset-template.yml](../../multicluster/config/samples/clusterset_init/member-clusterset-template.yml)):
 
 ```yaml
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: id.k8s.io
-  namespace: kube-system
-value: test-cluster-east
----
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: clusterset.k8s.io
-  namespace: kube-system
-value: test-clusterset
----
 apiVersion: multicluster.crd.antrea.io/v1alpha1
 kind: ClusterSet
 metadata:
   name: test-clusterset
   namespace: kube-system
 spec:
+  clusterID: test-cluster-east
+  clusterSetID: test-clusterset
   leaders:
     - clusterID: test-cluster-north
       secret: "member-east-token"
@@ -288,29 +261,17 @@ spec:
 Note: update `server: "https://172.18.0.1:6443"` in the `ClusterSet` spec to the
 correct leader cluster API server address.
 
-- Create `ClusterClaim` and `ClusterSet` in member cluster `test-cluster-west`:
+- Create `ClusterSet` in member cluster `test-cluster-west`:
 
 ```yaml
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: id.k8s.io
-  namespace: kube-system
-value: test-cluster-west
----
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: clusterset.k8s.io
-  namespace: kube-system
-value: test-clusterset
----
 apiVersion: multicluster.crd.antrea.io/v1alpha1
 kind: ClusterSet
 metadata:
   name: test-clusterset
   namespace: kube-system
 spec:
+  clusterID: test-cluster-west
+  clusterSetID: test-clusterset
   leaders:
     - clusterID: test-cluster-north
       secret: "member-west-token"
@@ -326,31 +287,18 @@ Member in One Cluster](#deploy-leader-and-member-in-one-cluster) and repeat the
 steps in [Set up Access to Leader Cluster](#set-up-access-to-leader-cluster) as
 well (don't forget replace all `east` to `north` when you repeat the steps).
 
-Then create the `ClusterClaim` and `ClusterSet` CRs in cluster
-`test-cluster-north` in the `kube-system` Namespace (where the member
-Multi-cluster Controller runs):
+Then create the `ClusterSet` CRs in cluster `test-cluster-north` in the
+`kube-system` Namespace (where the member Multi-cluster Controller runs):
 
 ```yaml
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: id.k8s.io
-  namespace: kube-system
-value: test-cluster-north
----
-apiVersion: multicluster.crd.antrea.io/v1alpha2
-kind: ClusterClaim
-metadata:
-  name: clusterset.k8s.io
-  namespace: kube-system
-value: test-clusterset
----
 apiVersion: multicluster.crd.antrea.io/v1alpha1
 kind: ClusterSet
 metadata:
   name: test-clusterset
   namespace: kube-system
 spec:
+  clusterID: test-cluster-north
+  clusterSetID: test-clusterset
   leaders:
     - clusterID: test-cluster-north
       secret: "member-north-token"

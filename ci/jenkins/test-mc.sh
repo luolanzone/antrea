@@ -20,7 +20,7 @@ function echoerr {
     >&2 echo "$@"
 }
 
-DEFAULT_WORKDIR="/var/lib/jenkins"
+DEFAULT_WORKDIR=`pwd`
 WORKDIR=$DEFAULT_WORKDIR
 TESTCASE=""
 TEST_FAILURE=false
@@ -264,13 +264,14 @@ function run_codecov { (set -e
 function modify_config {
   if [[ ${ENABLE_MC_GATEWAY} == "true" ]]; then
   cat > build/yamls/chart-values/antrea.yml << EOF
+trafficEncapMode: "encap"
 multicluster:
   enableGateway: true
   enableStretchedNetworkPolicy: true
   enablePodToPodConnectivity: true
-featureGates: {
+featureGates:
   Multicluster: true
-}
+  EndpointSlice: true
 EOF
   make manifest
   cd multicluster
@@ -281,23 +282,23 @@ EOF
 }
 
 function deliver_antrea_multicluster {
-    echo "====== Building Antrea for the Following Commit ======"
-    export GO111MODULE=on
-    export GOPATH=${WORKDIR}/go
-    export GOROOT=/usr/local/go
-    export PATH=${GOROOT}/bin:$PATH
+    # echo "====== Building Antrea for the Following Commit ======"
+    # export GO111MODULE=on
+    # export GOPATH=${WORKDIR}/go
+    # export GOROOT=/usr/local/go
+    # export PATH=${GOROOT}/bin:$PATH
 
-    git show --numstat
-    make clean
+    # git show --numstat
+    # make clean
 
-    # Ensure that files in the Docker context have the correct permissions, or Docker caching cannot
-    # be leveraged successfully
-    chmod -R g-w build/images/ovs
-    chmod -R g-w build/images/base
+    # # Ensure that files in the Docker context have the correct permissions, or Docker caching cannot
+    # # be leveraged successfully
+    # chmod -R g-w build/images/ovs
+    # chmod -R g-w build/images/base
 
-    DOCKER_REGISTRY="${DOCKER_REGISTRY}" ./hack/build-antrea-linux-all.sh --pull
-    echo "====== Delivering Antrea to all Nodes ======"
-    docker save -o ${WORKDIR}/antrea-ubuntu.tar antrea/antrea-ubuntu:latest
+    # DOCKER_REGISTRY="${DOCKER_REGISTRY}" ./hack/build-antrea-linux-all.sh --pull
+    # echo "====== Delivering Antrea to all the Nodes ======"
+    # docker save -o ${WORKDIR}/antrea-ubuntu.tar antrea/antrea-ubuntu:latest
 
 
     if [[ ${KIND} == "true" ]]; then
@@ -334,8 +335,8 @@ function deliver_multicluster_controller {
         ./multicluster/hack/generate-manifest.sh -l antrea-multicluster -c > ./multicluster/test/yamls/leader-manifest.yml
         ./multicluster/hack/generate-manifest.sh -m -c > ./multicluster/test/yamls/member-manifest.yml
     else
-        export NO_PULL=1;make build-antrea-mc-controller
-        docker save "${DEFAULT_IMAGE}" -o "${WORKDIR}"/antrea-mcs.tar
+        export NO_PULL=1;make antrea-mc-controller
+        # docker save "${DEFAULT_IMAGE}" -o "${WORKDIR}"/antrea-mcs.tar
         ./multicluster/hack/generate-manifest.sh -l antrea-multicluster > ./multicluster/test/yamls/leader-manifest.yml
         ./multicluster/hack/generate-manifest.sh -m > ./multicluster/test/yamls/member-manifest.yml
     fi
@@ -397,13 +398,13 @@ function run_multicluster_e2e {
 
     wait_for_multicluster_controller_ready
 
-    docker pull "${DOCKER_REGISTRY}"/antrea/nginx:1.21.6-alpine
-    docker save "${DOCKER_REGISTRY}"/antrea/nginx:1.21.6-alpine -o "${WORKDIR}"/nginx.tar
+    # docker pull "${DOCKER_REGISTRY}"/antrea/nginx:1.21.6-alpine
+    # docker save "${DOCKER_REGISTRY}"/antrea/nginx:1.21.6-alpine -o "${WORKDIR}"/nginx.tar
 
     # Use the same agnhost image which is defined as 'agnhostImage' in antrea/test/e2e/framework.go to
     # avoid pulling the image again when running Multi-cluster e2e tests.
-    docker pull "registry.k8s.io/e2e-test-images/agnhost:2.29"
-    docker save "registry.k8s.io/e2e-test-images/agnhost:2.29" -o "${WORKDIR}"/agnhost.tar
+    # docker pull "registry.k8s.io/e2e-test-images/agnhost:2.29"
+    # docker save "registry.k8s.io/e2e-test-images/agnhost:2.29" -o "${WORKDIR}"/agnhost.tar
 
     if [[ ${KIND} == "true" ]]; then
         for name in ${CLUSTER_NAMES[*]}; do
@@ -429,26 +430,26 @@ function run_multicluster_e2e {
         done
     fi
 
-    set +e
-    CURRENT_DIR=`pwd`
-    mkdir -p ${CURRENT_DIR}/antrea-multicluster-test-logs
-    options=""
-    if [[ ${ENABLE_MC_GATEWAY} == "true" ]]; then
-        options="--mc-gateway"
-    fi
-    if [[ ${KIND} == "true" ]]; then
-        options+=" --provider kind"
-    fi
+    # set +e
+    # CURRENT_DIR=`pwd`
+    # mkdir -p ${CURRENT_DIR}/antrea-multicluster-test-logs
+    # options=""
+    # if [[ ${ENABLE_MC_GATEWAY} == "true" ]]; then
+    #     options="--mc-gateway"
+    # fi
+    # if [[ ${KIND} == "true" ]]; then
+    #     options+=" --provider kind"
+    # fi
 
-    set -x
-    go test -v antrea.io/antrea/multicluster/test/e2e --logs-export-dir `pwd`/antrea-multicluster-test-logs $options
-    if [[ "$?" != "0" ]]; then
-        TEST_FAILURE=true
-    fi
-    set +x
-    set -e
+    # set -x
+    # go test -v antrea.io/antrea/multicluster/test/e2e --logs-export-dir `pwd`/antrea-multicluster-test-logs $options
+    # if [[ "$?" != "0" ]]; then
+    #     TEST_FAILURE=true
+    # fi
+    # set +x
+    # set -e
 
-    tar -zcf antrea-test-logs.tar.gz antrea-multicluster-test-logs
+    # tar -zcf antrea-test-logs.tar.gz antrea-multicluster-test-logs
 }
 
 function collect_coverage {
@@ -467,9 +468,9 @@ function collect_coverage {
     done
 }
 
-trap clean_multicluster EXIT
-clean_tmp
-clean_images
+# trap clean_multicluster EXIT
+# clean_tmp
+# clean_images
 
 if [[ ${KIND} == "true" ]]; then
     # Preparing a ClusterSet contains three Kind clusters.

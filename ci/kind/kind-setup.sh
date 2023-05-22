@@ -119,7 +119,7 @@ function configure_networks {
   # remove old networks
   nodes="$(kind get nodes --name $CLUSTER_NAME | grep worker)"
   nodes=$(echo $nodes)
-  networks+=" kind"
+  networks="kind"
   echo "removing worker nodes $nodes from networks $networks"
   for n in $networks; do
     rm_nodes=$(docker network inspect $n --format '{{range $i, $conf:=.Containers}}{{$conf.Name}} {{end}}')
@@ -139,7 +139,7 @@ function configure_networks {
   i=0
   networks=()
   for s in $SUBNETS; do
-    network=antrea-$i
+    network=antrea-$RANDOM-$i
     echo "creating network $network with $s"
     docker network create -d bridge --subnet $s $network >/dev/null 2>&1
     networks+=($network)

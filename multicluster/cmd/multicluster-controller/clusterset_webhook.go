@@ -31,10 +31,6 @@ import (
 
 //+kubebuilder:webhook:path=/validate-multicluster-crd-antrea-io-v1alpha2-clusterset,mutating=false,failurePolicy=fail,sideEffects=None,groups=multicluster.crd.antrea.io,resources=clustersets,verbs=create;update,versions=v1alpha2,name=vclusterset.kb.io,admissionReviewVersions={v1,v1beta1}
 
-const (
-	mcControllerSAName = "antrea-mc-controller"
-)
-
 // ClusterSet validator
 type clusterSetValidator struct {
 	Client    client.Client

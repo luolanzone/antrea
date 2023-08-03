@@ -16,6 +16,8 @@ limitations under the License.
 
 package common
 
+import "time"
+
 type ClusterID string
 type ClusterSetID string
 
@@ -46,4 +48,6 @@ const (
 	// when a lot of LabelIdentity events happen concurrently.
 	ResourceExchangeQPS   = 100
 	ResourceExchangeBurst = 200
+
+	MemberClusterAnnounceStaleTime = 3 * time.Minute
 )

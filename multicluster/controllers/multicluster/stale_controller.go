@@ -41,16 +41,14 @@ import (
 const (
 	LeaderCluster = "leader"
 	MemberCluster = "member"
-
-	memberClusterAnnounceStaleTime = 5 * time.Minute
 )
 
 // StaleResCleanupController will clean up ServiceImport, MC Service, ACNP, ClusterInfoImport and LabelIdentity
 // resources if no corresponding ResourceImports in the leader cluster and remove stale ResourceExports
 // in the leader cluster if no corresponding ServiceExport or Gateway in the member cluster when it runs in
 // the member cluster.
-// It will clean up stale MemberClusterAnnounce resources in the leader cluster if no corresponding member
-// cluster in the ClusterSet.Spec.Members when it runs in the leader cluster.
+// It will clean up stale MemberClusterAnnounce resources in the leader cluster if the last update timestamp
+// annotation is over 24 hours.
 type StaleResCleanupController struct {
 	client.Client
 	Scheme           *runtime.Scheme
@@ -86,17 +84,7 @@ func NewStaleResCleanupController(
 // +kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports,verbs=get;list;watch;delete
 
 func (c *StaleResCleanupController) cleanup(ctx context.Context) error {
-	switch c.clusterRole {
-	case LeaderCluster:
-		return c.cleanupStaleResourcesOnLeader(ctx)
-	case MemberCluster:
-		return c.cleanupStaleResourcesOnMember(ctx)
-	}
-	return nil
-}
-
-func (c *StaleResCleanupController) cleanupStaleResourcesOnLeader(ctx context.Context) error {
-	return c.cleanupMemberClusterAnnounces(ctx)
+	return c.cleanupStaleResourcesOnMember(ctx)
 }
 
 func (c *StaleResCleanupController) cleanupStaleResourcesOnMember(ctx context.Context) error {
@@ -375,30 +363,30 @@ func (c *StaleResCleanupController) cleanupClusterInfoResourceExport(ctx context
 	return nil
 }
 
-func (c *StaleResCleanupController) cleanupMemberClusterAnnounces(ctx context.Context) error {
+func (c *StaleResCleanupController) cleanupMemberClusterAnnounces(ctx context.Context) {
 	memberClusterAnnounceList := &mcsv1alpha1.MemberClusterAnnounceList{}
-	if err := c.List(ctx, memberClusterAnnounceList, &client.ListOptions{}); err != nil {
-		return err
+	if err := c.List(ctx, memberClusterAnnounceList, &client.ListOptions{Namespace: c.namespace}); err != nil {
+		klog.V(2).ErrorS(err, "Fail to get MemberClusterAnnounce in the Namespace", "namespace", c.namespace)
+		return
 	}
 
 	for _, m := range memberClusterAnnounceList.Items {
 		memberClusterAnnounce := m
 		lastUpdateTime, err := time.Parse(time.RFC3339, memberClusterAnnounce.Annotations[commonarea.TimestampAnnotationKey])
-		if err == nil && time.Since(lastUpdateTime) < memberClusterAnnounceStaleTime {
+		if err == nil && time.Since(lastUpdateTime) < common.MemberClusterAnnounceStaleTime {
 			continue
 		}
 		if err == nil {
-			klog.InfoS("Cleaning up stale MemberClusterAnnounce. It has not been updated within the agreed period", "MemberClusterAnnounce", klog.KObj(&memberClusterAnnounce), "agreedPeriod", memberClusterAnnounceStaleTime)
+			klog.InfoS("Cleaning up stale MemberClusterAnnounce. It has not been updated within the agreed period", "MemberClusterAnnounce", klog.KObj(&memberClusterAnnounce), "agreedPeriod", common.MemberClusterAnnounceStaleTime)
 		} else {
 			klog.InfoS("Cleaning up stale MemberClusterAnnounce. The latest update time is not in RFC3339 format", "MemberClusterAnnounce", klog.KObj(&memberClusterAnnounce))
 		}
 
 		if err := c.Client.Delete(ctx, &memberClusterAnnounce, &client.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			klog.ErrorS(err, "Failed to delete stale MemberClusterAnnounce", "MemberClusterAnnounce", klog.KObj(&memberClusterAnnounce))
-			return err
+			return
 		}
 	}
-	return nil
 }
 
 // Enqueue will be called after StaleResCleanupController is initialized.
@@ -416,10 +404,17 @@ func (c *StaleResCleanupController) Run(stopCh <-chan struct{}) {
 	defer klog.InfoS("Shutting down StaleResCleanupController")
 
 	ctx, _ := wait.ContextForChannel(stopCh)
-	if err := c.RunOnce(ctx); err != nil {
-		c.Enqueue()
-		go wait.UntilWithContext(ctx, c.runWorker, time.Second)
+
+	switch c.clusterRole {
+	case LeaderCluster:
+		go wait.UntilWithContext(ctx, c.cleanupMemberClusterAnnounces, 300*time.Second)
+	case MemberCluster:
+		if err := c.RunOnce(ctx); err != nil {
+			c.Enqueue()
+			go wait.UntilWithContext(ctx, c.runWorker, time.Second)
+		}
 	}
+
 	<-stopCh
 }
 

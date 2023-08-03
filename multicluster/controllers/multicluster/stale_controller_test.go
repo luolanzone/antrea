@@ -560,7 +560,7 @@ func TestStaleController_CleanupMemberClusterAnnounce(t *testing.T) {
 							Namespace: "default",
 							Name:      "member-cluster-from-cluster-outdated",
 							Annotations: map[string]string{
-								commonarea.TimestampAnnotationKey: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+								commonarea.TimestampAnnotationKey: time.Now().Add(-common.MemberClusterAnnounceStaleTime - 1).Format(time.RFC3339),
 							},
 						},
 						ClusterID: "cluster-outdated",
@@ -572,10 +572,8 @@ func TestStaleController_CleanupMemberClusterAnnounce(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.memberClusterAnnounceList).WithLists(tt.clusterSet).Build()
-
-			mcReconciler := member.NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", false, false)
-			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, LeaderCluster)
-			assert.Equal(t, nil, c.cleanup(ctx))
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", nil, LeaderCluster)
+			c.cleanupMemberClusterAnnounces(ctx)
 
 			memberClusterAnnounceList := &mcv1alpha1.MemberClusterAnnounceList{}
 			if err := fakeClient.List(context.TODO(), memberClusterAnnounceList, &client.ListOptions{}); err != nil {

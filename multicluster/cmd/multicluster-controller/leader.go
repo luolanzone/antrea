@@ -107,6 +107,13 @@ func runLeader(o *Options) error {
 		return fmt.Errorf("error creating ResourceExport webhook: %v", err)
 	}
 
+	memberClusterCleanupController := leader.NewMemberResourcesCleanupController(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		env.GetPodNamespace(),
+	)
+	go memberClusterCleanupController.SetupWithManager(mgr, stopCh)
+
 	staleController := multiclustercontrollers.NewStaleResCleanupController(
 		mgr.GetClient(),
 		mgr.GetScheme(),

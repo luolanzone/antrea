@@ -109,6 +109,12 @@ func (r *MemberClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			r.clusterID = common.InvalidClusterID
 			r.clusterSetID = common.InvalidClusterSetID
 		}
+		if r.remoteCommonArea == nil {
+			klog.InfoS("Clean up all resources created by Antrea Multi-cluster controller when the ClusterSet is deleted", "clusterset", req.NamespacedName)
+			if err := cleanUpResourcesCreatedByMC(ctx, r.Client); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 

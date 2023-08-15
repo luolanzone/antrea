@@ -54,6 +54,7 @@ type MemberClusterSetReconciler struct {
 	Scheme                   *runtime.Scheme
 	Namespace                string
 	ClusterCalimCRDAvailable bool
+
 	// commonAreaLock protects the access to RemoteCommonArea.
 	commonAreaLock sync.RWMutex
 
@@ -62,8 +63,7 @@ type MemberClusterSetReconciler struct {
 	clusterID        common.ClusterID
 	installedLeader  leaderClusterInfo
 
-	remoteCommonArea commonarea.RemoteCommonArea
-
+	remoteCommonArea             commonarea.RemoteCommonArea
 	enableStretchedNetworkPolicy bool
 }
 
@@ -98,6 +98,10 @@ func (r *MemberClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 		klog.InfoS("Received ClusterSet delete", "clusterset", req.NamespacedName)
 		if r.remoteCommonArea != nil {
+			klog.InfoS("Clean up all exported resources created by Antrea Multi-cluster controller", "clusterset", req.NamespacedName)
+			if err := r.deleteResourceExports(ctx); err != nil {
+				return ctrl.Result{}, err
+			}
 			if err := r.deleteMemberClusterAnnounce(ctx); err != nil {
 				// MemberClusterAnnounce could be kept in the leader cluster, if antrea-mc-controller crashes after the failure.
 				// Leader cluster will delete the stale MemberClusterAnnounce with a garbage collection mechanism in this case.
@@ -108,6 +112,10 @@ func (r *MemberClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			r.clusterSetConfig = nil
 			r.clusterID = common.InvalidClusterID
 			r.clusterSetID = common.InvalidClusterSetID
+		}
+		klog.InfoS("Clean up all stale resources created by Antrea Multi-cluster controller", "clusterset", req.NamespacedName)
+		if err := common.CleanUpResourcesCreatedByMC(ctx, r.Client); err != nil {
+			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
@@ -144,6 +152,23 @@ func (r *MemberClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	return ctrl.Result{}, nil
 }
 
+func (r *MemberClusterSetReconciler) deleteResourceExports(ctx context.Context) error {
+	resExports := &mcv1alpha1.ResourceExportList{}
+	if err := r.remoteCommonArea.List(ctx, resExports, &client.ListOptions{Namespace: r.remoteCommonArea.GetNamespace()}); err != nil {
+		return err
+	}
+	for _, resExp := range resExports.Items {
+		if resExp.Spec.ClusterID == string(r.clusterID) {
+			err := r.remoteCommonArea.Delete(ctx, &resExp, &client.DeleteOptions{})
+			if err == nil || apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *MemberClusterSetReconciler) deleteMemberClusterAnnounce(ctx context.Context) error {
 	memberClusterAnnounce := &mcv1alpha1.MemberClusterAnnounce{
 		ObjectMeta: metav1.ObjectMeta{
@@ -162,7 +187,7 @@ func (r *MemberClusterSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Update status periodically
 	go func() {
 		for {
-			<-time.After(time.Second * 30)
+			<-time.After(time.Second * 15)
 			r.updateStatus()
 		}
 	}()
@@ -348,6 +373,7 @@ func (r *MemberClusterSetReconciler) updateStatus() {
 	err := r.Get(context.TODO(), namespacedName, clusterSet)
 	if err != nil {
 		klog.ErrorS(err, "Failed to read ClusterSet", "name", namespacedName)
+		return
 	}
 	status.Conditions = clusterSet.Status.Conditions
 	if (len(clusterSet.Status.Conditions) == 1 && clusterSet.Status.Conditions[0].Status != overallCondition.Status) ||

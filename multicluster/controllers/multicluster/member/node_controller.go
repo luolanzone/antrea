@@ -199,7 +199,10 @@ func (r *NodeReconciler) updateActiveGateway(ctx context.Context, newGateway *mc
 	// TODO: cache might be stale. Need to revisit here and other reconcilers to
 	// check if we can improve this with 'Owns' or other methods.
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: newGateway.Name, Namespace: r.namespace}, existingGW); err != nil {
-		return err
+		if apierrors.IsNotFound(err) {
+			r.activeGateway = ""
+		}
+		return client.IgnoreNotFound(err)
 	}
 	if existingGW.GatewayIP == newGateway.GatewayIP && existingGW.InternalIP == newGateway.InternalIP &&
 		existingGW.ServiceCIDR == newGateway.ServiceCIDR {

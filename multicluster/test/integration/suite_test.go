@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -36,12 +37,10 @@ import (
 
 	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	mcv1alpha2 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha2"
-	multiclustercontrollers "antrea.io/antrea/multicluster/controllers/multicluster"
 	"antrea.io/antrea/multicluster/controllers/multicluster/leader"
 	"antrea.io/antrea/multicluster/controllers/multicluster/member"
 	antreamcscheme "antrea.io/antrea/multicluster/pkg/client/clientset/versioned/scheme"
 	antreascheme "antrea.io/antrea/pkg/client/clientset/versioned/scheme"
-	"antrea.io/antrea/pkg/signals"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -162,24 +161,18 @@ var _ = BeforeSuite(func() {
 	// configureClusterSet finishes
 
 	By("Creating StaleController")
-	stopCh := signals.RegisterSignalHandlers()
-	staleController := multiclustercontrollers.NewStaleResCleanupController(
+	staleController := member.NewMemberStaleResCleanupController(
 		k8sManager.GetClient(),
 		k8sManager.GetScheme(),
 		"default",
 		clusterSetReconciler,
-		multiclustercontrollers.MemberCluster,
 	)
 
-	go staleController.Run(stopCh)
 	// Make sure to trigger clean up process every 5 seconds
 	// otherwise staleResCleanupController will only run once before test case is ready to run.
-	go func() {
-		for {
-			staleController.Enqueue()
-			time.Sleep(5 * time.Second)
-		}
-	}()
+	go wait.UntilWithContext(ctx, func(ctx context.Context) {
+		staleController.CleanUp(ctx)
+	}, 5*time.Second)
 
 	By("Creating ResourceExportReconciler")
 	resExportReconciler := leader.NewResourceExportReconciler(

@@ -29,12 +29,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	k8smcv1alpha1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	mcv1alpha2 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha2"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 	"antrea.io/antrea/multicluster/controllers/multicluster/commonarea"
 	"antrea.io/antrea/multicluster/test/mocks"
+	"antrea.io/antrea/pkg/apis/crd/v1beta1"
 )
 
 func TestMemberClusterDelete(t *testing.T) {
@@ -176,7 +178,6 @@ func TestMemberClusterStatus(t *testing.T) {
 				clusterSetID:     "clusterset1",
 				clusterID:        "east",
 			}
-
 			reconciler.updateStatus()
 			clusterSet := &mcv1alpha2.ClusterSet{}
 
@@ -290,6 +291,9 @@ func TestLeaderClusterSetAddWithoutClusterID(t *testing.T) {
 	}
 
 	scheme := runtime.NewScheme()
+	k8smcv1alpha1.AddToScheme(scheme)
+	v1beta1.AddToScheme(scheme)
+	mcv1alpha1.AddToScheme(scheme)
 	mcv1alpha2.AddToScheme(scheme)
 	k8sscheme.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(clusterSetWithoutClusterID, clusterClaim, existingSecret).Build()

@@ -39,8 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	k8smcsapi "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
-	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
-	"antrea.io/antrea/multicluster/controllers/multicluster"
+	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
+	mcv1alpha2 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha2"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 	"antrea.io/antrea/multicluster/controllers/multicluster/commonarea"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
@@ -65,12 +65,12 @@ var (
 	ctx    = context.Background()
 	scheme = runtime.NewScheme()
 
-	svcResImport = &mcsv1alpha1.ResourceImport{
+	svcResImport = &mcv1alpha1.ResourceImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: leaderNamespace,
 			Name:      svcResImportName,
 		},
-		Spec: mcsv1alpha1.ResourceImportSpec{
+		Spec: mcv1alpha1.ResourceImportSpec{
 			Namespace: "default",
 			Name:      "nginx",
 			Kind:      "ServiceImport",
@@ -103,16 +103,16 @@ var (
 			},
 		},
 	}
-	epResImport = &mcsv1alpha1.ResourceImport{
+	epResImport = &mcv1alpha1.ResourceImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: leaderNamespace,
 			Name:      epResImportName,
 		},
-		Spec: mcsv1alpha1.ResourceImportSpec{
+		Spec: mcv1alpha1.ResourceImportSpec{
 			Namespace: "default",
 			Name:      "nginx",
 			Kind:      "Endpoints",
-			Endpoints: &mcsv1alpha1.EndpointsImport{
+			Endpoints: &mcv1alpha1.EndpointsImport{
 				Subsets: epSubset,
 			},
 		},
@@ -120,7 +120,7 @@ var (
 )
 
 func init() {
-	utilruntime.Must(mcsv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(mcv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 	utilruntime.Must(v1beta1.AddToScheme(scheme))
 	utilruntime.Must(k8smcsapi.AddToScheme(scheme))
@@ -393,7 +393,7 @@ func TestResourceImportReconciler_handleUpdateEvent(t *testing.T) {
 		},
 	}
 	updatedEpResImport := epResImport.DeepCopy()
-	updatedEpResImport.Spec.Endpoints = &mcsv1alpha1.EndpointsImport{
+	updatedEpResImport.Spec.Endpoints = &mcv1alpha1.EndpointsImport{
 		Subsets: newSubsets,
 	}
 	svcResImportWithConflicts := svcResImport.DeepCopy()
@@ -539,7 +539,7 @@ func (fm *fakeManager) syncNextItemInQueue() bool {
 		return false
 	}
 	defer fm.queue.Done(resImpObj)
-	resImp := resImpObj.(*mcsv1alpha1.ResourceImport)
+	resImp := resImpObj.(*mcv1alpha1.ResourceImport)
 	err := fm.remoteClient.Create(ctx, resImp)
 	if err != nil {
 		fm.queue.AddRateLimited(resImp)
@@ -556,13 +556,18 @@ func (fm *fakeManager) syncNextItemInQueue() bool {
 }
 
 func TestStaleControllerNoRaceWithResourceImportReconciler(t *testing.T) {
-	fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists().Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects(&mcv1alpha2.ClusterSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-cluster",
+		},
+	}).WithLists().Build()
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists().Build()
 	ca := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", common.LocalClusterID, "antrea-mcs", nil)
 
 	mcReconciler := NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", true, false)
 	mcReconciler.SetRemoteCommonArea(ca)
-	c := multicluster.NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, multicluster.MemberCluster)
+	c := NewMemberStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler)
 	r := newLabelIdentityResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", ca)
 
 	stopCh := make(chan struct{})
@@ -570,13 +575,13 @@ func TestStaleControllerNoRaceWithResourceImportReconciler(t *testing.T) {
 	q := workqueue.NewRateLimitingQueue(workqueue.DefaultItemBasedRateLimiter())
 	numInitialResImp := 50
 	for i := 1; i <= numInitialResImp; i++ {
-		resImp := &mcsv1alpha1.ResourceImport{
+		resImp := &mcv1alpha1.ResourceImport{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "label-identity-" + strconv.Itoa(i),
 				Namespace: "antrea-mcs",
 			},
-			Spec: mcsv1alpha1.ResourceImportSpec{
-				LabelIdentity: &mcsv1alpha1.LabelIdentitySpec{
+			Spec: mcv1alpha1.ResourceImportSpec{
+				LabelIdentity: &mcv1alpha1.LabelIdentitySpec{
 					Label: "ns:kubernetes.io/metadata.name=ns&pod:seq=" + strconv.Itoa(i),
 					ID:    uint32(i),
 				},
@@ -596,7 +601,7 @@ func TestStaleControllerNoRaceWithResourceImportReconciler(t *testing.T) {
 	// of newly added ResourceImports are in-flight.
 	go c.Run(stopCh)
 	time.Sleep(1 * time.Second)
-	actLabelIdentities := &mcsv1alpha1.LabelIdentityList{}
+	actLabelIdentities := &mcv1alpha1.LabelIdentityList{}
 	err := fakeClient.List(ctx, actLabelIdentities)
 	assert.NoError(t, err)
 	// Verify that no LabelIdentities are deleted as part of the cleanup.

@@ -83,11 +83,11 @@ func (r *ResourceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	switch resExport.Spec.Kind {
 	case constants.ServiceKind:
-		klog.V(2).InfoS("Reconciling Service type of ResourceExport", "resourceexport", req.NamespacedName)
+		klog.InfoS("Reconciling Service type of ResourceExport", "resourceexport", req.NamespacedName)
 	case constants.EndpointsKind:
-		klog.V(2).InfoS("Reconciling Endpoint type of ResourceExport", "resourceexport", req.NamespacedName)
+		klog.InfoS("Reconciling Endpoint type of ResourceExport", "resourceexport", req.NamespacedName)
 	case constants.AntreaClusterNetworkPolicyKind:
-		klog.V(2).InfoS("Reconciling AntreaClusterNetworkPolicy type of ResourceExport", "resourceexport", req.NamespacedName)
+		klog.InfoS("Reconciling AntreaClusterNetworkPolicy type of ResourceExport", "resourceexport", req.NamespacedName)
 	case constants.ClusterInfoKind:
 		return r.handleClusterInfo(ctx, req, resExport)
 	default:
@@ -211,8 +211,8 @@ func (r *ResourceExportReconciler) handleDeleteEvent(ctx context.Context, resExp
 		return err
 	}
 	resImportName := GetResourceImportName(resExport)
-	klog.V(2).InfoS("Deleting ResourceImport created by ResourceExport", "resourceimport", resImportName.String(), "resourceexport", resExport.Name)
-
+	klog.InfoS("Deleting ResourceImport created by ResourceExport", "resourceimport", resImportName.String(), "resourceexport", resExport.Name)
+	klog.InfoS("resList size", "reList.Items", len(reList.Items))
 	undeleteItems := RemoveDeletedResourceExports(reList.Items)
 	if len(undeleteItems) == 0 {
 		err = r.cleanUpResourceImport(ctx, resImportName, resExport)

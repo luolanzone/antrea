@@ -88,10 +88,11 @@ func NewLabelIdentityExportReconciler(
 // +kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceexports/status,verbs=get;update;patch
 func (r *LabelIdentityExportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var resExport mcsv1alpha1.ResourceExport
+	klog.InfoS("LabelIdentity ResourceExport event coming", "resourceexport", req.NamespacedName)
 	clusterID, labelHash := parseLabelIdentityExportNamespacedName(req.NamespacedName)
 	if err := r.Client.Get(ctx, req.NamespacedName, &resExport); err != nil {
 		if apierrors.IsNotFound(err) {
-			klog.V(2).InfoS("ResourceExport is deleted", "resourceexport", req.NamespacedName, "cluster", clusterID)
+			klog.InfoS("ResourceExport is deleted", "resourceexport", req.NamespacedName, "cluster", clusterID, "labelhash", labelHash)
 			r.onLabelExportDelete(clusterID, labelHash)
 			return ctrl.Result{}, nil
 		}
@@ -141,8 +142,10 @@ func (r *LabelIdentityExportReconciler) onLabelExportDelete(clusterID, labelHash
 		// the label identity. Hence, the label identity is no longer present in the ClusterSet.
 		delete(r.labelsToClusters, labelHash)
 		delete(r.hashToLabels, labelHash)
+		klog.InfoS("It's the last cluster with the label", "labelHash", labelHash)
 		r.labelQueue.Add(labelHash)
 	} else {
+		klog.InfoS("remove label to cluster", "clusterID", clusterID, "labelHash", labelHash)
 		// Remove mapping from label to cluster
 		clusters.Delete(clusterID)
 	}
@@ -219,6 +222,7 @@ func (r *LabelIdentityExportReconciler) syncLabelResourceImport(labelHash string
 			return err
 		}
 	} else {
+		klog.InfoS("start todelete labelIdentity import", "labelHash", labelHash)
 		// If a label hash does not exist in hashToLabels, it means no cluster in the
 		// ClusterSet still has the corresponding label identity.
 		if err := r.handleLabelIdentityDelete(ctx, labelHash); err != nil {
@@ -239,6 +243,7 @@ func (r *LabelIdentityExportReconciler) handleLabelIdentityDelete(ctx context.Co
 			Namespace: r.namespace,
 		},
 	}
+	klog.InfoS("delete labelIdenetiyImport", "labelIdentityImport", klog.KObj(labelIdentityImport))
 	if err := r.Client.Delete(ctx, labelIdentityImport, &client.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}

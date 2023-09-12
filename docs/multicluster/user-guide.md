@@ -805,6 +805,56 @@ the image.
 3. Copy the image file `antrea-mcs.tar` to the Nodes of your local cluster.
 4. Run `docker load < antrea-mcs.tar` in each Node of your local cluster.
 
+## Remove a member cluster
+
+When you want to remove a member cluster in a ClusterSet, please follow up
+the following steps to clean up all Multi-cluster related resources.
+
+1. Delete the existing ClusterSet CR:
+
+```bash
+# Please replace 'kube-system' with the right one if the Antrea Multi-cluster is not
+# deployed in the default Namespace.
+kubectl get clusterset -n kube-system -o=jsonpath='{.items[0].metadata.name}' | xargs -I{} kubectl delete clusterset {} -n kube-system
+```
+
+2. Delete the Antrea Multi-cluster deployment:
+
+```bash
+kubectl delete -f https://github.com/antrea-io/antrea/releases/download/$TAG/antrea-multicluster-member.yml
+```
+
+## Remove a Leader Cluster
+
+When you want to remove the leader cluster in a ClusterSet, please follow up
+the following steps to clean up all Multi-cluster related resources. Please notes
+that you need to follow the section [Remove a member cluster](#remove-a-member-cluster)
+to remove all member clusters before removing a leader cluster.
+
+Notes: Please replace `antrea-multicluster` with the right one in the following sample
+commands if the Antrea Multi-cluster is not deployed in the default Namespace.
+
+1. Verify that there is no remaining MemberClusterAnnounces: `kubectl get memberclusterannounce -n antrea-multicluster`.
+2. Delete the existing ClusterSet CR:
+
+```bash
+kubectl get clusterset -n antrea-multicluster -o=jsonpath='{.items[0].metadata.name}' | xargs -I{} kubectl delete clusterset {} -n antrea-multicluster
+```
+
+3. Check there is no remaining ResourceExports and ResourceImports:
+
+```bash
+kubectl get resourceexports -n antrea-multicluster
+kubectl get resourceimports -n antrea-multicluster
+```
+
+4. Delete the Antrea Multi-cluster deployment:
+
+```bash
+kubectl delete -f https://github.com/antrea-io/antrea/releases/download/$TAG/antrea-multicluster-leader.yml
+```
+
+
 ## Known Issue
 
 We recommend user to redeploy or update Antrea Multi-cluster Controller through

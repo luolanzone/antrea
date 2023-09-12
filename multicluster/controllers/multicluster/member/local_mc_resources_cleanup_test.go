@@ -128,6 +128,7 @@ func TestCleanuUpLabelIdentities(t *testing.T) {
 	ctx := context.Background()
 	err := cleanUpLabelIdentities(ctx, fakeClient)
 	require.NoError(t, err)
+
 	actualIdtList := &mcv1alpha1.LabelIdentityList{}
 	err = fakeClient.List(ctx, actualIdtList, &client.ListOptions{})
 	require.NoError(t, err)
@@ -156,8 +157,32 @@ func TestCleanUpClusterInfoImport(t *testing.T) {
 	ctx := context.Background()
 	err := cleanUpClusterInfoImport(ctx, fakeClient)
 	require.NoError(t, err)
+
 	actualCIImpList := &mcv1alpha1.ClusterInfoImportList{}
 	err = fakeClient.List(ctx, actualCIImpList, &client.ListOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(actualCIImpList.Items))
+}
+
+func TestCleanUpGateway(t *testing.T) {
+	gwList := &mcv1alpha1.GatewayList{
+		Items: []mcv1alpha1.Gateway{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "gw-1",
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(gwList).Build()
+	ctx := context.Background()
+	err := cleanUpGateway(ctx, fakeClient)
+	require.NoError(t, err)
+
+	actualGWList := &mcv1alpha1.ClusterInfoImportList{}
+	err = fakeClient.List(ctx, actualGWList, &client.ListOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(actualGWList.Items))
 }

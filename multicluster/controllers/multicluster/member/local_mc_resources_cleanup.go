@@ -44,6 +44,9 @@ func cleanUpResourcesCreatedByMC(ctx context.Context, mgrClient client.Client) e
 	if err = cleanUpClusterInfoImport(ctx, mgrClient); err != nil {
 		return err
 	}
+	if err = cleanUpGateway(ctx, mgrClient); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -62,14 +65,13 @@ func cleanUpMCServiceAndServiceImport(ctx context.Context, mgrClient client.Clie
 			},
 		}
 		err = mgrClient.Delete(ctx, mcsvc, &client.DeleteOptions{})
-		if err == nil || (err != nil && apierrors.IsNotFound(err)) {
-			err = mgrClient.Delete(ctx, &svcImpTmp, &client.DeleteOptions{})
-			if err == nil || (err != nil && apierrors.IsNotFound(err)) {
-				continue
-			}
+		if err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
-		return err
+		err = mgrClient.Delete(ctx, &svcImpTmp, &client.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
 	}
 	return nil
 }
@@ -83,10 +85,9 @@ func cleanUpReplicatedACNP(ctx context.Context, mgrClient client.Client) error {
 		acnpTmp := acnp
 		if metav1.HasAnnotation(acnp.ObjectMeta, common.AntreaMCACNPAnnotation) {
 			err := mgrClient.Delete(ctx, &acnpTmp, &client.DeleteOptions{})
-			if err == nil || (err != nil && apierrors.IsNotFound(err)) {
-				continue
+			if err != nil && !apierrors.IsNotFound(err) {
+				return err
 			}
-			return err
 		}
 	}
 	return nil
@@ -100,10 +101,9 @@ func cleanUpLabelIdentities(ctx context.Context, mgrClient client.Client) error 
 	for _, labelIdt := range labelIdentityList.Items {
 		labelIdtTmp := labelIdt
 		err := mgrClient.Delete(ctx, &labelIdtTmp, &client.DeleteOptions{})
-		if err == nil || (err != nil && apierrors.IsNotFound(err)) {
-			continue
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
 		}
-		return err
 	}
 	return nil
 }
@@ -116,10 +116,24 @@ func cleanUpClusterInfoImport(ctx context.Context, mgrClient client.Client) erro
 	for _, ciImp := range ciImpList.Items {
 		ciImpTmp := ciImp
 		err := mgrClient.Delete(ctx, &ciImpTmp, &client.DeleteOptions{})
-		if err == nil || (err != nil && apierrors.IsNotFound(err)) {
-			continue
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
 		}
+	}
+	return nil
+}
+
+func cleanUpGateway(ctx context.Context, mgrClient client.Client) error {
+	gwList := &mcv1alpha1.GatewayList{}
+	if err := mgrClient.List(ctx, gwList, &client.ListOptions{}); err != nil {
 		return err
+	}
+	for _, gw := range gwList.Items {
+		gwTmp := gw
+		err := mgrClient.Delete(ctx, &gwTmp, &client.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
 	}
 	return nil
 }

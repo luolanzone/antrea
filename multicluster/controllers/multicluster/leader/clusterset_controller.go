@@ -72,10 +72,15 @@ func (r *LeaderClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			return ctrl.Result{}, err
 		}
 		klog.InfoS("Received ClusterSet delete", "clusterset", req.NamespacedName)
+		if r.clusterSetConfig != nil && r.clusterSetConfig.Name != req.Name {
+			return ctrl.Result{}, nil
+		}
 		r.clusterSetConfig = nil
 		r.clusterID = common.InvalidClusterID
 		r.clusterSetID = common.InvalidClusterSetID
-
+		if err := cleanUpResourceExports(ctx, r.Client); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 

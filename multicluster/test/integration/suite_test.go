@@ -41,6 +41,7 @@ import (
 	"antrea.io/antrea/multicluster/controllers/multicluster/member"
 	antreamcscheme "antrea.io/antrea/multicluster/pkg/client/clientset/versioned/scheme"
 	antreascheme "antrea.io/antrea/pkg/client/clientset/versioned/scheme"
+	"antrea.io/antrea/pkg/signals"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -130,19 +131,23 @@ var _ = BeforeSuite(func() {
 		Scheme: scheme,
 	})
 	Expect(err).ToNot(HaveOccurred())
+
 	k8sServerURL = testEnv.Config.Host
-	ctx := context.Background()
+	stopCh := signals.RegisterSignalHandlers()
+	ctx, _ := wait.ContextForChannel(stopCh)
 
 	By("Creating MemberClusterSetReconciler")
 	k8sClient.Create(ctx, leaderNS)
 	k8sClient.Create(ctx, testNS)
 	k8sClient.Create(ctx, testNSStale)
+	commonAreaCreationCh := make(chan struct{})
 	clusterSetReconciler := member.NewMemberClusterSetReconciler(
 		k8sManager.GetClient(),
 		k8sManager.GetScheme(),
 		LeaderNamespace,
 		false,
 		false,
+		commonAreaCreationCh,
 	)
 	err = clusterSetReconciler.SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
@@ -161,17 +166,19 @@ var _ = BeforeSuite(func() {
 	// configureClusterSet finishes
 
 	By("Creating StaleController")
-	staleController := member.NewMemberStaleResCleanupController(
+	staleController := member.NewStaleResCleanupController(
 		k8sManager.GetClient(),
 		k8sManager.GetScheme(),
+		commonAreaCreationCh,
 		"default",
 		clusterSetReconciler,
 	)
 
-	// Make sure to trigger clean up process every 5 seconds
-	// otherwise staleResCleanupController will only run once before test case is ready to run.
+	go staleController.Run(stopCh)
+	// Fake the commonAreaCreation event since the ClusterSet creation is only triggered one time
+	// when the ClusterSet is created, but the stale controller test is not running yet.
 	go wait.UntilWithContext(ctx, func(ctx context.Context) {
-		staleController.CleanUp(ctx)
+		commonAreaCreationCh <- struct{}{}
 	}, 5*time.Second)
 
 	By("Creating ResourceExportReconciler")

@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"antrea.io/antrea/multicluster/apis/multicluster/constants"
 	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	mcv1alpha2 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha2"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
@@ -98,7 +99,9 @@ func TestCleanUpStaleResourceExports(t *testing.T) {
 					Namespace: "default",
 					Name:      "leader-acnp",
 				},
-				Spec: mcv1alpha1.ResourceExportSpec{},
+				Spec: mcv1alpha1.ResourceExportSpec{
+					Kind: constants.AntreaClusterNetworkPolicyKind,
+				},
 			},
 		},
 	}
@@ -106,9 +109,9 @@ func TestCleanUpStaleResourceExports(t *testing.T) {
 	scheme := runtime.NewScheme()
 	mcv1alpha1.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(mcaList, resExports).Build()
-	c := NewLeaderStaleResCleanupController(fakeClient, scheme, "default")
+	c := NewStaleResCleanupController(fakeClient, scheme)
 	ctx := context.Background()
-	c.cleanUpStaleResourceExports(ctx)
+	cleanUpStaleResourceExports(ctx, c.Client)
 	latestResExports := &mcv1alpha1.ResourceExportList{}
 	err := fakeClient.List(ctx, latestResExports)
 	require.NoError(t, err)
@@ -152,12 +155,21 @@ func TestReconcile(t *testing.T) {
 	}
 	scheme := runtime.NewScheme()
 	mcv1alpha1.AddToScheme(scheme)
+	now := metav1.Now()
 	memberClusterAnnounce1 := &mcv1alpha1.MemberClusterAnnounce{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "member-announce-from-cluster-1",
-			Namespace: "default",
+			Name:              "member-announce-from-cluster-1",
+			Namespace:         "default",
+			DeletionTimestamp: &now,
 		},
 		ClusterID: "cluster-1",
+	}
+	memberClusterAnnounce2 := &mcv1alpha1.MemberClusterAnnounce{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "member-announce-from-cluster-2",
+			Namespace: "default",
+		},
+		ClusterID: "cluster-2",
 	}
 
 	tests := []struct {
@@ -167,24 +179,24 @@ func TestReconcile(t *testing.T) {
 		expectedErr                   error
 		existingMemberAnnounce        *mcv1alpha1.MemberClusterAnnounce
 		existingResExports            *mcv1alpha1.ResourceExportList
-		getResourceExportsByClusterID func(c *LeaderStaleResCleanupController, ctx context.Context, clusterID string) ([]mcv1alpha1.ResourceExport, error)
+		getResourceExportsByClusterID func(c *StaleResCleanupController, ctx context.Context, clusterID string) ([]mcv1alpha1.ResourceExport, error)
 	}{
-		{
-			name:                   "MemberClusterAnnounce exists",
-			memberAnnounceName:     memberClusterAnnounce1.Name,
-			existingMemberAnnounce: memberClusterAnnounce1,
-			existingResExports:     resExportsList,
-			expectedResExportsSize: 3,
-		},
 		{
 			name:                   "MemberClusterAnnounce deleted",
 			memberAnnounceName:     memberClusterAnnounce1.Name,
-			existingMemberAnnounce: &mcv1alpha1.MemberClusterAnnounce{},
+			existingMemberAnnounce: memberClusterAnnounce1,
 			existingResExports:     resExportsList,
-			getResourceExportsByClusterID: func(c *LeaderStaleResCleanupController, ctx context.Context, clusterID string) ([]mcv1alpha1.ResourceExport, error) {
+			getResourceExportsByClusterID: func(c *StaleResCleanupController, ctx context.Context, clusterID string) ([]mcv1alpha1.ResourceExport, error) {
 				return []mcv1alpha1.ResourceExport{resExport1, resExport2}, nil
 			},
 			expectedResExportsSize: 1,
+		},
+		{
+			name:                   "MemberClusterAnnounce exists",
+			memberAnnounceName:     memberClusterAnnounce2.Name,
+			existingMemberAnnounce: memberClusterAnnounce2,
+			existingResExports:     resExportsList,
+			expectedResExportsSize: 3,
 		},
 	}
 	for _, tt := range tests {
@@ -194,7 +206,7 @@ func TestReconcile(t *testing.T) {
 				getResourceExportsByClusterIDFunc = getResourceExportsByClusterID
 			}()
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existingResExports).WithObjects(tt.existingMemberAnnounce).Build()
-			c := NewLeaderStaleResCleanupController(fakeClient, scheme, "default")
+			c := NewStaleResCleanupController(fakeClient, scheme)
 			ctx := context.Background()
 			_, err := c.Reconcile(ctx, ctrl.Request{
 				NamespacedName: types.NamespacedName{
@@ -301,8 +313,8 @@ func TestStaleController_CleanUpMemberClusterAnnounces(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.memberClusterAnnounceList).WithLists(tt.clusterSet).Build()
-			c := NewLeaderStaleResCleanupController(fakeClient, common.TestScheme, "default")
-			c.cleanUpStaleMemberClusterAnnounces(ctx)
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme)
+			c.cleanUpExpiredMemberClusterAnnounces(ctx)
 
 			memberClusterAnnounceList := &mcv1alpha1.MemberClusterAnnounceList{}
 			if err := fakeClient.List(context.TODO(), memberClusterAnnounceList, &client.ListOptions{}); err != nil {

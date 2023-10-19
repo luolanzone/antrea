@@ -33,8 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	"antrea.io/antrea/multicluster/apis/multicluster/constants"
-	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	mcv1alpha2 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha2"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 )
@@ -80,12 +78,6 @@ func (r *LeaderClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		r.clusterSetConfig = nil
 		r.clusterID = common.InvalidClusterID
 		r.clusterSetID = common.InvalidClusterSetID
-		if err := cleanUpAllMemberClusterAnnounces(ctx, r.Client); err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := cleanUpResourceExports(ctx, r.Client); err != nil {
-			return ctrl.Result{}, err
-		}
 		return ctrl.Result{}, nil
 	}
 
@@ -130,7 +122,7 @@ func (r *LeaderClusterSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&mcv1alpha2.ClusterSet{}).
 		WithEventFilter(instance).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: common.DefaultWorkerCount,
+			MaxConcurrentReconciles: 1,
 		}).
 		Complete(r)
 }
@@ -241,25 +233,4 @@ func validateMemberClusterExists(clusterID common.ClusterID, clusters []mcv1alph
 		return
 	}
 	return
-}
-
-func cleanUpResourceExports(ctx context.Context, mgrClient client.Client) error {
-	resExports := mcv1alpha1.ResourceExportList{}
-	err := mgrClient.List(ctx, &resExports, &client.ListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, resExport := range resExports.Items {
-		// AntreaClusterNetworkPolicy type of ResourceExports are created by the
-		// user, we should skip deleting this kind of ResourceExports.
-		if resExport.Spec.Kind == constants.AntreaClusterNetworkPolicyKind {
-			continue
-		}
-		resExpTmp := resExport
-		err := mgrClient.Delete(ctx, &resExpTmp, &client.DeleteOptions{})
-		if err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
-	}
-	return nil
 }

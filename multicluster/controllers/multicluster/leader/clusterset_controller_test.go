@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -259,34 +258,4 @@ func TestLeaderClusterStatus(t *testing.T) {
 	assert.Equal(t, expectedStatus.Conditions[0].Reason, actualStatus.Conditions[0].Reason)
 	assert.Equal(t, expectedStatus.Conditions[0].Status, actualStatus.Conditions[0].Status)
 	assert.Equal(t, expectedStatus.Conditions[0].Message, actualStatus.Conditions[0].Message)
-}
-
-func TestCleanUpResourceExports(t *testing.T) {
-	resExports := &mcv1alpha1.ResourceExportList{
-		Items: []mcv1alpha1.ResourceExport{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "default",
-					Name:      "acnp",
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "default",
-					Name:      "svc-1",
-				},
-			},
-		},
-	}
-	scheme := runtime.NewScheme()
-	mcv1alpha1.AddToScheme(scheme)
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(resExports).Build()
-	ctx := context.Background()
-	err := cleanUpResourceExports(ctx, fakeClient)
-	require.NoError(t, err)
-
-	resExportList := &mcv1alpha1.ResourceExportList{}
-	err = fakeClient.List(ctx, resExportList, &client.ListOptions{})
-	require.NoError(t, err)
-	assert.Equal(t, 0, len(resExportList.Items))
 }

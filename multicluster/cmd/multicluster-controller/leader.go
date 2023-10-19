@@ -113,16 +113,14 @@ func runLeader(o *Options) error {
 		return fmt.Errorf("error creating ResourceExport webhook: %v", err)
 	}
 
-	staleController := leader.NewLeaderStaleResCleanupController(
+	staleController := leader.NewStaleResCleanupController(
 		mgr.GetClient(),
 		mgr.GetScheme(),
-		env.GetPodNamespace(),
 	)
-	if err = staleController.SetupWithManager(mgr, stopCh); err != nil {
-		return fmt.Errorf("error creating LeaderStaleResCleanupController: %v", err)
+	if err = staleController.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("error creating StaleResCleanupController: %v", err)
 	}
 	go staleController.RunPeriodically(stopCh)
-	go staleController.RunOnce(stopCh)
 
 	klog.InfoS("Leader MC Controller Starting Manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

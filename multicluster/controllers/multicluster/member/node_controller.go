@@ -201,8 +201,9 @@ func (r *NodeReconciler) updateActiveGateway(ctx context.Context, newGateway *mc
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: newGateway.Name, Namespace: r.namespace}, existingGW); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.activeGateway = ""
+			return nil
 		}
-		return client.IgnoreNotFound(err)
+		return err
 	}
 	if existingGW.GatewayIP == newGateway.GatewayIP && existingGW.InternalIP == newGateway.InternalIP &&
 		existingGW.ServiceCIDR == newGateway.ServiceCIDR {

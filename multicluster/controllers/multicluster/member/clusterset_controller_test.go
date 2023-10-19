@@ -238,17 +238,17 @@ func TestMemberCreateOrUpdateRemoteCommonArea(t *testing.T) {
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects(existingClusterSet, existingSecret).Build()
 	commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader1", common.LocalClusterID, "mcs1", nil)
 	reconciler := MemberClusterSetReconciler{
-		Client:           fakeClient,
-		remoteCommonArea: commonArea,
-		clusterSetConfig: existingClusterSet,
-		clusterSetID:     "clusterset1",
-		clusterID:        "east",
+		Client:                       fakeClient,
+		remoteCommonArea:             commonArea,
+		clusterSetConfig:             existingClusterSet,
+		clusterSetID:                 "clusterset1",
+		clusterID:                    "east",
+		enableStretchedNetworkPolicy: true,
 	}
-
 	mockCtrl := gomock.NewController(t)
 	mockManager := mocks.NewMockManager(mockCtrl)
-	mockManager.EXPECT().GetClient()
-	mockManager.EXPECT().GetScheme()
+	mockManager.EXPECT().GetClient().Times(2)
+	mockManager.EXPECT().GetScheme().Times(2)
 
 	getRemoteConfigAndClient = commonarea.FuncGetFakeRemoteConfigAndClient(mockManager)
 
@@ -257,7 +257,7 @@ func TestMemberCreateOrUpdateRemoteCommonArea(t *testing.T) {
 	assert.Equal(t, expectedInstalledLeader, reconciler.installedLeader)
 }
 
-func TestLeaderClusterSetAddWithoutClusterID(t *testing.T) {
+func TestMemberClusterSetAddWithoutClusterID(t *testing.T) {
 	existingSecret := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "mcs1",
@@ -307,7 +307,11 @@ func TestLeaderClusterSetAddWithoutClusterID(t *testing.T) {
 	reconciler := MemberClusterSetReconciler{
 		Client:                   fakeClient,
 		ClusterCalimCRDAvailable: true,
+		commonAreaCreationCh:     make(chan struct{}),
 	}
+	go func() {
+		<-reconciler.commonAreaCreationCh
+	}()
 	if _, err := reconciler.Reconcile(common.TestCtx, ctrl.Request{
 		NamespacedName: types.NamespacedName{
 			Namespace: "mcs1",

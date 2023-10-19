@@ -56,7 +56,8 @@ type MemberClusterSetReconciler struct {
 	ClusterCalimCRDAvailable bool
 
 	// commonAreaLock protects the access to RemoteCommonArea.
-	commonAreaLock sync.RWMutex
+	commonAreaLock       sync.RWMutex
+	commonAreaCreationCh chan struct{}
 
 	clusterSetConfig *mcv1alpha2.ClusterSet
 	clusterSetID     common.ClusterSetID
@@ -72,6 +73,7 @@ func NewMemberClusterSetReconciler(client client.Client,
 	namespace string,
 	enableStretchedNetworkPolicy bool,
 	clusterCalimCRDAvailable bool,
+	commonAreaCreationCh chan struct{},
 ) *MemberClusterSetReconciler {
 	return &MemberClusterSetReconciler{
 		Client:                       client,
@@ -79,6 +81,7 @@ func NewMemberClusterSetReconciler(client client.Client,
 		Namespace:                    namespace,
 		enableStretchedNetworkPolicy: enableStretchedNetworkPolicy,
 		ClusterCalimCRDAvailable:     clusterCalimCRDAvailable,
+		commonAreaCreationCh:         commonAreaCreationCh,
 	}
 }
 
@@ -90,83 +93,74 @@ func NewMemberClusterSetReconciler(client client.Client,
 func (r *MemberClusterSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	clusterSet := &mcv1alpha2.ClusterSet{}
 	err := r.Get(ctx, req.NamespacedName, clusterSet)
-	r.commonAreaLock.Lock()
-	defer r.commonAreaLock.Unlock()
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-		klog.InfoS("Received ClusterSet delete", "clusterset", req.NamespacedName)
-		if r.remoteCommonArea != nil {
-			klog.InfoS("Clean up all exported resources created by Antrea Multi-cluster controller", "clusterset", req.NamespacedName)
-			if err := r.deleteResourceExports(ctx); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.deleteMemberClusterAnnounce(ctx); err != nil {
-				// MemberClusterAnnounce could be kept in the leader cluster, if antrea-mc-controller crashes after the failure.
-				// Leader cluster will delete the stale MemberClusterAnnounce with a garbage collection mechanism in this case.
-				return ctrl.Result{}, fmt.Errorf("failed to delete MemberClusterAnnounce in the leader cluster: %v", err)
-			}
-			r.remoteCommonArea.Stop()
-			r.remoteCommonArea = nil
-			r.clusterSetConfig = nil
-			r.clusterID = common.InvalidClusterID
-			r.clusterSetID = common.InvalidClusterSetID
-		}
-		klog.InfoS("Clean up all stale resources created by Antrea Multi-cluster controller", "clusterset", req.NamespacedName)
-		if err := common.CleanUpResourcesCreatedByMC(ctx, r.Client); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
-	klog.InfoS("Received ClusterSet add/update", "clusterset", klog.KObj(clusterSet))
-
-	// Handle create or update
-	if r.clusterSetConfig == nil {
-		r.clusterID, err = common.GetClusterID(r.ClusterCalimCRDAvailable, req, r.Client, clusterSet)
+	processClusterSet := func() error {
+		r.commonAreaLock.Lock()
+		defer r.commonAreaLock.Unlock()
 		if err != nil {
-			return ctrl.Result{}, err
+			if !apierrors.IsNotFound(err) {
+				return err
+			}
+			klog.InfoS("Received ClusterSet delete", "clusterset", req.NamespacedName)
+			if r.remoteCommonArea != nil {
+				// Any ResourceExports belongs to this member cluster will be cleaned up by the leader cluster
+				// when its MemberClusterAnnounce is deleted.
+				if err := r.deleteMemberClusterAnnounce(ctx); err != nil {
+					// MemberClusterAnnounce could be kept in the leader cluster, if antrea-mc-controller crashes after the failure.
+					// Leader cluster will delete the stale MemberClusterAnnounce with a garbage collection mechanism in this case.
+					return fmt.Errorf("failed to delete MemberClusterAnnounce in the leader cluster: %v", err)
+				}
+				r.remoteCommonArea.Stop()
+				r.remoteCommonArea = nil
+				r.clusterSetConfig = nil
+				r.clusterID = common.InvalidClusterID
+				r.clusterSetID = common.InvalidClusterSetID
+			}
+			klog.InfoS("Clean up all resources created by Antrea Multi-cluster Controller", "clusterset", req.NamespacedName)
+			if err := cleanUpResourcesCreatedByMC(ctx, r.Client); err != nil {
+				return err
+			}
+			return nil
 		}
-		r.clusterSetID = common.ClusterSetID(clusterSet.Name)
-		if clusterSet.Spec.ClusterID == "" {
-			// ClusterID is a required feild, and the empty value case should only happen
-			// when Antrea Multi-cluster is upgraded from an old version prior to v1.13.
-			// Here we try to update the ClusterSet's ClusterID when it's configured in an
-			// existing ClusterClaim.
-			clusterSet.Spec.ClusterID = string(r.clusterID)
-			err = r.Update(context.TODO(), clusterSet)
+
+		klog.InfoS("Received ClusterSet add/update", "clusterset", klog.KObj(clusterSet))
+
+		// Handle create or update
+		if r.clusterSetConfig == nil {
+			r.clusterID, err = common.GetClusterID(r.ClusterCalimCRDAvailable, req, r.Client, clusterSet)
 			if err != nil {
-				klog.ErrorS(err, "Failed to update ClusterSet's ClusterID", "clusterset", req.NamespacedName)
-				return ctrl.Result{}, err
+				return err
+			}
+			r.clusterSetID = common.ClusterSetID(clusterSet.Name)
+			if clusterSet.Spec.ClusterID == "" {
+				// ClusterID is a required feild, and the empty value case should only happen
+				// when Antrea Multi-cluster is upgraded from an old version prior to v1.13.
+				// Here we try to update the ClusterSet's ClusterID when it's configured in an
+				// existing ClusterClaim.
+				clusterSet.Spec.ClusterID = string(r.clusterID)
+				err = r.Update(context.TODO(), clusterSet)
+				if err != nil {
+					klog.ErrorS(err, "Failed to update ClusterSet's ClusterID", "clusterset", req.NamespacedName)
+					return err
+				}
 			}
 		}
-	}
-	r.clusterSetConfig = clusterSet.DeepCopy()
+		r.clusterSetConfig = clusterSet.DeepCopy()
 
-	err = r.createOrUpdateRemoteCommonArea(clusterSet)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{}, nil
-}
-
-func (r *MemberClusterSetReconciler) deleteResourceExports(ctx context.Context) error {
-	resExports := &mcv1alpha1.ResourceExportList{}
-	if err := r.remoteCommonArea.List(ctx, resExports, &client.ListOptions{Namespace: r.remoteCommonArea.GetNamespace()}); err != nil {
-		return err
-	}
-	for _, resExp := range resExports.Items {
-		if resExp.Spec.ClusterID == string(r.clusterID) {
-			err := r.remoteCommonArea.Delete(ctx, &resExp, &client.DeleteOptions{})
-			if err == nil || apierrors.IsNotFound(err) {
-				continue
-			}
+		err = r.createOrUpdateRemoteCommonArea(clusterSet)
+		if err != nil {
 			return err
 		}
+		return nil
 	}
-	return nil
+	if err := processClusterSet(); err != nil {
+		return ctrl.Result{}, err
+	}
+	if r.clusterSetConfig != nil {
+		// The CommonArea creation succeeded here and so notify StaleController to
+		// clean up stale imported resources and ResourceExports.
+		r.commonAreaCreationCh <- struct{}{}
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *MemberClusterSetReconciler) deleteMemberClusterAnnounce(ctx context.Context) error {
@@ -187,7 +181,7 @@ func (r *MemberClusterSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Update status periodically
 	go func() {
 		for {
-			<-time.After(time.Second * 15)
+			<-time.After(time.Second * 30)
 			r.updateStatus()
 		}
 	}()
@@ -198,7 +192,7 @@ func (r *MemberClusterSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&mcv1alpha2.ClusterSet{}).
 		WithEventFilter(generationPredicate).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: common.DefaultWorkerCount,
+			MaxConcurrentReconciles: 1,
 		}).
 		Complete(r)
 }
@@ -372,7 +366,9 @@ func (r *MemberClusterSetReconciler) updateStatus() {
 	clusterSet := &mcv1alpha2.ClusterSet{}
 	err := r.Get(context.TODO(), namespacedName, clusterSet)
 	if err != nil {
-		klog.ErrorS(err, "Failed to read ClusterSet", "name", namespacedName)
+		if !apierrors.IsNotFound(err) {
+			klog.ErrorS(err, "Failed to read ClusterSet", "name", namespacedName)
+		}
 		return
 	}
 	status.Conditions = clusterSet.Status.Conditions

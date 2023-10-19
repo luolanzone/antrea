@@ -69,11 +69,13 @@ func runMember(o *Options) error {
 			role:      memberRole},
 		})
 
+	commonAreaCreationCh := make(chan struct{})
 	clusterSetReconciler := member.NewMemberClusterSetReconciler(mgr.GetClient(),
 		mgr.GetScheme(),
 		env.GetPodNamespace(),
 		o.EnableStretchedNetworkPolicy,
 		o.ClusterCalimCRDAvailable,
+		commonAreaCreationCh,
 	)
 	if err = clusterSetReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating ClusterSet controller: %v", err)
@@ -121,16 +123,16 @@ func runMember(o *Options) error {
 		return fmt.Errorf("error creating Node controller: %v", err)
 	}
 
-	staleController := member.NewMemberStaleResCleanupController(
+	staleController := member.NewStaleResCleanupController(
 		mgr.GetClient(),
 		mgr.GetScheme(),
+		commonAreaCreationCh,
 		env.GetPodNamespace(),
 		commonAreaGetter,
 	)
-	if err = staleController.SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("error creating MemberStaleResCleanupController: %v", err)
-	}
+
 	go staleController.Run(stopCh)
+
 	// Member runs ResourceImportReconciler from RemoteCommonArea only
 
 	klog.InfoS("Member MC Controller Starting Manager")

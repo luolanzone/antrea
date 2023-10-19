@@ -89,12 +89,6 @@ func (r *MemberClusterAnnounceReconciler) Reconcile(ctx context.Context, req ctr
 	finalizer := fmt.Sprintf("%s/%s", MemberClusterAnnounceFinalizer, memberAnnounce.ClusterID)
 	if !memberAnnounce.DeletionTimestamp.IsZero() {
 		r.removeMemberStatus(memberID)
-		memberAnnounce.Finalizers = common.RemoveStringFromSlice(memberAnnounce.Finalizers, finalizer)
-		if err := r.Update(context.TODO(), memberAnnounce); err != nil {
-			klog.ErrorS(err, "Failed to update MemberClusterAnnounce", "MemberClusterAnnounce", klog.KObj(memberAnnounce))
-			return ctrl.Result{}, err
-		}
-
 		return ctrl.Result{}, nil
 	}
 

@@ -565,9 +565,12 @@ func TestStaleControllerNoRaceWithResourceImportReconciler(t *testing.T) {
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists().Build()
 	ca := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", common.LocalClusterID, "antrea-mcs", nil)
 
-	mcReconciler := NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", true, false)
+	mcReconciler := NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", true, false, make(chan struct{}))
 	mcReconciler.SetRemoteCommonArea(ca)
-	c := NewMemberStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler)
+	c := NewStaleResCleanupController(fakeClient, common.TestScheme, make(chan struct{}), "default", mcReconciler)
+	go func() {
+		c.commonAreaCreationCh <- struct{}{}
+	}()
 	r := newLabelIdentityResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", ca)
 
 	stopCh := make(chan struct{})

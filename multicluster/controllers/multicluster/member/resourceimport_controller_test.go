@@ -28,11 +28,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,8 +40,6 @@ import (
 	mcv1alpha2 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha2"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 	"antrea.io/antrea/multicluster/controllers/multicluster/commonarea"
-	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
-	"antrea.io/antrea/pkg/apis/crd/v1beta1"
 )
 
 var (
@@ -62,8 +57,7 @@ var (
 		Name:      epResImportName,
 	}}
 
-	ctx    = context.Background()
-	scheme = runtime.NewScheme()
+	ctx = context.Background()
 
 	svcResImport = &mcv1alpha1.ResourceImport{
 		ObjectMeta: metav1.ObjectMeta{
@@ -119,17 +113,9 @@ var (
 	}
 )
 
-func init() {
-	utilruntime.Must(mcv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
-	utilruntime.Must(v1beta1.AddToScheme(scheme))
-	utilruntime.Must(k8smcsapi.AddToScheme(scheme))
-	utilruntime.Must(k8sscheme.AddToScheme(scheme))
-}
-
 func TestResourceImportReconciler_handleCreateEvent(t *testing.T) {
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(svcResImport, epResImport).Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).Build()
+	fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects(svcResImport, epResImport).Build()
 	remoteCluster := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default", nil)
 
 	tests := []struct {
@@ -149,7 +135,7 @@ func TestResourceImportReconciler_handleCreateEvent(t *testing.T) {
 		},
 	}
 
-	r := newResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", remoteCluster)
+	r := newResourceImportReconciler(fakeClient, common.TestScheme, fakeClient, localClusterID, "default", remoteCluster)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := r.Reconcile(ctx, tt.req); err != nil {
@@ -198,8 +184,8 @@ func TestResourceImportReconciler_handleDeleteEvent(t *testing.T) {
 		},
 	}
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existSvc, existEp, existSvcImp).Build()
-	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects(existSvc, existEp, existSvcImp).Build()
+	fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).Build()
 	remoteCluster := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default", nil)
 
 	tests := []struct {
@@ -219,7 +205,7 @@ func TestResourceImportReconciler_handleDeleteEvent(t *testing.T) {
 		},
 	}
 
-	r := newResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", remoteCluster)
+	r := newResourceImportReconciler(fakeClient, common.TestScheme, fakeClient, localClusterID, "default", remoteCluster)
 	r.installedResImports.Add(*svcResImport)
 	r.installedResImports.Add(*epResImport)
 
@@ -403,9 +389,9 @@ func TestResourceImportReconciler_handleUpdateEvent(t *testing.T) {
 	epResImportWithConflicts.Name = "kube-system-nginx-endpoints"
 	epResImportWithConflicts.Spec.Namespace = "kube-system"
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existMCSvc, existMCEp, existSvcImp,
+	fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects(existMCSvc, existMCEp, existSvcImp,
 		existSvc, existMCSvcConflicts, existMCEpConflicts, svcWithoutAutoAnnotation, epWithoutAutoAnnotation).Build()
-	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(updatedEpResImport, updatedSvcResImport,
+	fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects(updatedEpResImport, updatedSvcResImport,
 		svcResImportWithConflicts, epResImportWithConflicts).Build()
 	remoteCluster := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default", nil)
 
@@ -460,7 +446,7 @@ func TestResourceImportReconciler_handleUpdateEvent(t *testing.T) {
 		},
 	}
 
-	r := newResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", remoteCluster)
+	r := newResourceImportReconciler(fakeClient, common.TestScheme, fakeClient, localClusterID, "default", remoteCluster)
 	r.installedResImports.Add(*svcResImport)
 	r.installedResImports.Add(*epResImport)
 
@@ -571,7 +557,7 @@ func TestStaleControllerNoRaceWithResourceImportReconciler(t *testing.T) {
 	go func() {
 		c.commonAreaCreationCh <- struct{}{}
 	}()
-	r := newLabelIdentityResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", ca)
+	r := newLabelIdentityResourceImportReconciler(fakeClient, common.TestScheme, fakeClient, localClusterID, "default", ca)
 
 	stopCh := make(chan struct{})
 	defer close(stopCh)

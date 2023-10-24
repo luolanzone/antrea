@@ -23,20 +23,16 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	k8smcv1alpha1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	mcv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	mcv1alpha2 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha2"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 	"antrea.io/antrea/multicluster/controllers/multicluster/commonarea"
 	"antrea.io/antrea/multicluster/test/mocks"
-	"antrea.io/antrea/pkg/apis/crd/v1beta1"
 )
 
 func TestMemberClusterDelete(t *testing.T) {
@@ -252,7 +248,7 @@ func TestMemberCreateOrUpdateRemoteCommonArea(t *testing.T) {
 
 	getRemoteConfigAndClient = commonarea.FuncGetFakeRemoteConfigAndClient(mockManager)
 
-	err := reconciler.createOrUpdateRemoteCommonArea(existingClusterSet)
+	err := reconciler.createRemoteCommonArea(existingClusterSet)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, expectedInstalledLeader, reconciler.installedLeader)
 }
@@ -290,43 +286,60 @@ func TestMemberClusterSetAddWithoutClusterID(t *testing.T) {
 		Value: "member1",
 	}
 
-	scheme := runtime.NewScheme()
-	k8smcv1alpha1.AddToScheme(scheme)
-	v1beta1.AddToScheme(scheme)
-	mcv1alpha1.AddToScheme(scheme)
-	mcv1alpha2.AddToScheme(scheme)
-	k8sscheme.AddToScheme(scheme)
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(clusterSetWithoutClusterID, clusterClaim, existingSecret).Build()
-
-	mockCtrl := gomock.NewController(t)
-	mockManager := mocks.NewMockManager(mockCtrl)
-	mockManager.EXPECT().GetClient()
-	mockManager.EXPECT().GetScheme()
-	getRemoteConfigAndClient = commonarea.FuncGetFakeRemoteConfigAndClient(mockManager)
-
-	reconciler := MemberClusterSetReconciler{
-		Client:                   fakeClient,
-		ClusterCalimCRDAvailable: true,
-		commonAreaCreationCh:     make(chan struct{}),
-	}
-	go func() {
-		<-reconciler.commonAreaCreationCh
-	}()
-	if _, err := reconciler.Reconcile(common.TestCtx, ctrl.Request{
-		NamespacedName: types.NamespacedName{
-			Namespace: "mcs1",
-			Name:      "clusterset1",
+	tests := []struct {
+		name      string
+		clusterID common.ClusterID
+	}{
+		{
+			name: "create a new ClusterSet without a clusterID",
 		},
-	}); err != nil {
-		t.Errorf("Member ClusterSet Reconciler should handle add event successfully but got error = %v", err)
-	} else {
-		assert.Equal(t, nil, err)
-		assert.Equal(t, "clusterset1", string(reconciler.clusterSetID))
-		assert.Equal(t, "member1", string(reconciler.clusterID))
+		{
+			name:      "with non-empty clusterID",
+			clusterID: common.ClusterID("cluster-a"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects(clusterSetWithoutClusterID, clusterClaim, existingSecret).Build()
 
-		clusterSet := &mcv1alpha2.ClusterSet{}
-		err = fakeClient.Get(context.TODO(), types.NamespacedName{Name: "clusterset1", Namespace: "mcs1"}, clusterSet)
-		assert.Equal(t, nil, err)
-		assert.Equal(t, "member1", clusterSet.Spec.ClusterID)
+			mockCtrl := gomock.NewController(t)
+			mockManager := mocks.NewMockManager(mockCtrl)
+			mockManager.EXPECT().GetClient()
+			mockManager.EXPECT().GetScheme()
+			getRemoteConfigAndClient = commonarea.FuncGetFakeRemoteConfigAndClient(mockManager)
+
+			reconciler := MemberClusterSetReconciler{
+				Client:                   fakeClient,
+				ClusterCalimCRDAvailable: true,
+				commonAreaCreationCh:     make(chan struct{}),
+			}
+			go func() {
+				<-reconciler.commonAreaCreationCh
+			}()
+			if tt.clusterID != "" {
+				fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithObjects().Build()
+				commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader1", "clusterset1", "mcs1", nil)
+				reconciler.remoteCommonArea = commonArea
+				reconciler.clusterID = tt.clusterID
+			}
+
+			if _, err := reconciler.Reconcile(common.TestCtx, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: "mcs1",
+					Name:      "clusterset1",
+				},
+			}); err != nil {
+				t.Errorf("Member ClusterSet Reconciler should handle add event successfully but got error = %v", err)
+			} else {
+				assert.Equal(t, nil, err)
+				assert.Equal(t, "clusterset1", string(reconciler.clusterSetID))
+				assert.Equal(t, "member1", string(reconciler.clusterID))
+
+				clusterSet := &mcv1alpha2.ClusterSet{}
+				err = fakeClient.Get(context.TODO(), types.NamespacedName{Name: "clusterset1", Namespace: "mcs1"}, clusterSet)
+				assert.Equal(t, nil, err)
+				assert.Equal(t, "member1", clusterSet.Spec.ClusterID)
+			}
+		})
 	}
 }

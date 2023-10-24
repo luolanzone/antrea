@@ -29,7 +29,7 @@ const labelIdentityHashLength = 16
 var CleanUpRetry = wait.Backoff{
 	Steps:    5,
 	Duration: 500 * time.Millisecond,
-	Factor:   1.0,
+	Factor:   2.0,
 	Jitter:   1,
 }
 

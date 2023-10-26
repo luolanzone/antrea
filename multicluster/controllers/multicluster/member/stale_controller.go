@@ -269,6 +269,7 @@ func (c *StaleResCleanupController) cleanUpLabelIdentities(ctx context.Context, 
 // cleanUpServiceResourceExports removes any Service/Endpoint kind of ResourceExports when there is no
 // corresponding ServiceExport in the local cluster.
 func (c *StaleResCleanupController) cleanUpServiceResourceExports(ctx context.Context, commonArea commonarea.RemoteCommonArea, resExpList *mcv1alpha1.ResourceExportList) error {
+	klog.InfoS("here is cleanupdate")
 	svcExpList := &k8smcv1alpha1.ServiceExportList{}
 	if err := c.List(ctx, svcExpList, &client.ListOptions{}); err != nil {
 		return err
@@ -277,7 +278,9 @@ func (c *StaleResCleanupController) cleanUpServiceResourceExports(ctx context.Co
 	svcExpItems := svcExpList.Items
 	staleResExpItems := map[string]mcv1alpha1.ResourceExport{}
 
+	klog.InfoS("size", "svcExport", len(svcExpItems), "rexexport", len(allResExpItems))
 	for _, resExp := range allResExpItems {
+		klog.InfoS("resExp", "name", resExp.Name, "namespace", resExp.Namespace)
 		if resExp.Spec.Kind == constants.ServiceKind && resExp.Labels[constants.SourceClusterID] == c.localClusterID {
 			staleResExpItems[resExp.Spec.Namespace+"/"+resExp.Spec.Name+"service"] = resExp
 		}
@@ -287,6 +290,7 @@ func (c *StaleResCleanupController) cleanUpServiceResourceExports(ctx context.Co
 	}
 
 	for _, se := range svcExpItems {
+		klog.InfoS("svc", "name", se.Name, "namespace", se.Namespace)
 		delete(staleResExpItems, se.Namespace+"/"+se.Name+"service")
 		delete(staleResExpItems, se.Namespace+"/"+se.Name+"endpoint")
 	}
@@ -390,6 +394,7 @@ func (c *StaleResCleanupController) Run(stopCh <-chan struct{}) {
 		func() error {
 			return c.CleanUp(ctx)
 		})
+
 	<-stopCh
 }
 

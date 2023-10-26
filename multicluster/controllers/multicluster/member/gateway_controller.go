@@ -84,6 +84,9 @@ func NewGatewayReconciler(
 func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	klog.V(2).InfoS("Reconciling Gateway", "gateway", req.NamespacedName)
 	var commonArea commonarea.RemoteCommonArea
+	// TODO: there is a possibility that the commonArea becomes to nil right after it gets commonArea,
+	// then there might be new ResourceExport created in the leader after the member cluster
+	// is removed from the ClusterSet. We need to handle such corner case in the future release.
 	commonArea, r.localClusterID, _ = r.commonAreaGetter.GetRemoteCommonAreaAndLocalID()
 	if commonArea == nil {
 		klog.InfoS("Skip reconciling Gateway since there is no connection to the leader")

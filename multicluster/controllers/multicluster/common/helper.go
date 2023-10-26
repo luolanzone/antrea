@@ -27,7 +27,7 @@ const labelIdentityHashLength = 16
 // CleanUpRetry is the retry when the clean up method
 // failed to clean up all stale resources.
 var CleanUpRetry = wait.Backoff{
-	Steps:    5,
+	Steps:    50,
 	Duration: 500 * time.Millisecond,
 	Factor:   2.0,
 	Jitter:   1,

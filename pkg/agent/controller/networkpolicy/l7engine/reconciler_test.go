@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"antrea.io/antrea/pkg/agent/config"
 	v1beta "antrea.io/antrea/pkg/apis/controlplane/v1beta2"
 )
 
@@ -43,7 +44,7 @@ func (f *fakeSuricata) suricataScFunc(scCmd string) (*scCmdRet, error) {
 
 func (f *fakeSuricata) startSuricataFn() {
 	f.startSuricataFnCalled = true
-	defaultFS.Create(suricataCommandSocket)
+	defaultFS.Create(config.L7SuricataSocketPath)
 }
 
 func TestConvertProtocolHTTP(t *testing.T) {

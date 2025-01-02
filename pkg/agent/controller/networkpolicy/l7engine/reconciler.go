@@ -44,8 +44,6 @@ const (
 	tenantConfigsDir = "/etc/suricata"
 	tenantRulesDir   = "/etc/suricata/rules"
 
-	suricataCommandSocket = "/var/run/suricata/suricata-command.socket"
-
 	protocolHTTP = "http"
 	protocolTLS  = "tls"
 
@@ -62,7 +60,7 @@ var (
 	defaultFS = afero.NewOsFs()
 
 	// Create the config file /etc/suricata/antrea.yaml for Antrea which will be included in the default Suricata config file
-	// /etc/suricata/suricata.yaml. Two event logs in the config serve alert gilogging and http event logging purposes respectively.
+	// /etc/suricata/suricata.yaml. Two event logs in the config serve alert logging and http event logging purposes respectively.
 	suricataAntreaConfigData = fmt.Sprintf(`%%YAML 1.1
 ---
 outputs:
@@ -490,7 +488,7 @@ func (r *Reconciler) startSuricata() {
 
 	// Wait Suricata command socket file to be ready.
 	err = wait.PollUntilContextTimeout(context.TODO(), 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		if _, err = defaultFS.Stat(suricataCommandSocket); err != nil {
+		if _, err = defaultFS.Stat(config.L7SuricataSocketPath); err != nil {
 			return false, nil
 		}
 		return true, nil

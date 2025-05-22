@@ -43,6 +43,7 @@ import (
 const (
 	netDeviceTypeVeth = "veth"
 	netDeviceTypeVF   = "vf"
+	vfDeviceSuffix    = "~~"
 )
 
 // Declared variables for test
@@ -95,6 +96,50 @@ func (ic *ifConfigurator) moveVFtoContainerNS(vfNetDevice string, containerID st
 	hostIface := result.Interfaces[0]
 	containerIface := result.Interfaces[1]
 
+	link, err := ic.netlink.LinkByName(vfNetDevice)
+	klog.V(2).Infof("Get link of vfIFName: %s, link: %+v", vfNetDevice, link)
+	if err != nil {
+		return fmt.Errorf("error getting VF link: %v", err)
+	}
+
+	err = ic.netlink.LinkSetAlias(link, vfNetDevice)
+	if err != nil {
+		return fmt.Errorf("failed to set alias %s for VF netdevice %s: %v", vfNetDevice, vfNetDevice, err)
+	}
+	klog.V(2).InfoS("Link's alias has been updated", "alias", vfNetDevice)
+
+	// Rename the device in a temp NS to avoid race condition.
+	tempNS, err := ns.TempNetNS()
+	if err != nil {
+		return fmt.Errorf("failed to create tempNS: %v", err)
+	}
+	defer tempNS.Close()
+
+	// Move the host VF device into tempNS
+	if err = netlink.LinkSetNsFd(link, int(tempNS.Fd())); err != nil {
+		return fmt.Errorf("failed to move %q to tempNS: %v", link, err)
+	}
+
+	if err = tempNS.Do(func(hostNS ns.NetNS) error {
+		// Lookup the device in tempNS (index might have changed)
+		tempNSDev, err := netlink.LinkByName(vfNetDevice)
+		if err != nil {
+			return fmt.Errorf("failed to find %q in tempNS: %v", vfNetDevice, err)
+		}
+		defer func() {
+			if err != nil && tempNSDev != nil {
+				_ = netlink.LinkSetNsFd(tempNSDev, int(hostNS.Fd()))
+			}
+		}()
+		err = renameInterface(vfNetDevice, containerIfaceName)
+		if err != nil {
+			return fmt.Errorf("failed to rename VF netdevice as containerIfaceName %s: %v", containerIfaceName, err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	// Move VF to Container namespace
 	netns, err := nsGetNS(containerNetNS)
 	if err != nil {
@@ -107,10 +152,6 @@ func (ic *ifConfigurator) moveVFtoContainerNS(vfNetDevice string, containerID st
 	netns.Close()
 
 	if err := nsWithNetNSPath(containerNetNS, func(hostNS ns.NetNS) error {
-		err = renameInterface(vfNetDevice, containerIfaceName)
-		if err != nil {
-			return fmt.Errorf("failed to rename VF netdevice as containerIfaceName %s: %v", containerIfaceName, err)
-		}
 		link, err := ic.netlink.LinkByName(containerIfaceName)
 		if err != nil {
 			return fmt.Errorf("failed to find VF netdevice %s: %v", containerIfaceName, err)
@@ -229,6 +270,81 @@ func (ic *ifConfigurator) configureContainerSriovLink(
 	klog.V(2).Infof("hostIface.Name: %s, hostIface.Mac: %s, vfIFName: %s", hostIface.Name, hostIface.Mac, vfIFName)
 
 	return ic.moveVFtoContainerNS(vfIFName, containerID, containerNetNS, containerIfaceName, mtu, result)
+}
+
+// recoverVFInterfaceName rename the interface back to the original VF interface name.
+func (ic *ifConfigurator) recoverVFInterfaceName(containerNetNS string, containerIfaceName string) error {
+	tempNS, err := ns.TempNetNS()
+	if err != nil {
+		return fmt.Errorf("failed to create tempNS: %v", err)
+	}
+	defer tempNS.Close()
+
+	var originalVFName string
+	if err := nsWithNetNSPath(containerNetNS, func(hostNS ns.NetNS) error {
+		link, err := ic.netlink.LinkByName(containerIfaceName)
+		if err != nil {
+			return fmt.Errorf("failed to find container interface %s: %v", containerIfaceName, err)
+		}
+
+		originalVFName = link.Attrs().Alias
+		if originalVFName == "" {
+			return fmt.Errorf("failed to find original ifname for %q (alias is not set)", containerIfaceName)
+		}
+
+		// Move VF from Container namespace to tempNS
+		err = ic.moveIfToNetns(containerIfaceName, tempNS)
+		if err != nil {
+			return fmt.Errorf("failed to move VF %s to container tempNS %s: %v", containerIfaceName, tempNS, err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := nsWithNetNSPath(tempNS.Path(), func(hostNS ns.NetNS) error {
+		// lookup the device in tempNS (index might have changed)
+		tempNSDev, err := netlink.LinkByName(containerIfaceName)
+		if err != nil {
+			return fmt.Errorf("failed to find %q in tempNS: %v", containerIfaceName, err)
+		}
+		defer func() {
+			if err != nil && tempNSDev != nil {
+				// Move VF back to container namespace on error
+				netns, _ := nsGetNS(containerNetNS)
+				_ = netlink.LinkSetNsFd(tempNSDev, int(netns.Fd()))
+			}
+		}()
+
+		err = renameInterface(containerIfaceName, originalVFName)
+		if err != nil {
+			return fmt.Errorf("failed to rename VF netdevice %s to %s: %v", containerIfaceName, originalVFName, err)
+		}
+
+		// Unset device's alias property
+		if err = netlink.LinkSetAlias(tempNSDev, ""); err != nil {
+			return fmt.Errorf("failed to unset alias of %q: %v", originalVFName, err)
+		}
+
+		// Set back the device alias to originalVFName on error
+		defer func() {
+			if err != nil {
+				_ = netlink.LinkSetAlias(tempNSDev, originalVFName)
+			}
+		}()
+
+		// Move VF from container namespace back to hostNS
+		err = ic.moveIfToNetns(originalVFName, hostNS)
+		if err != nil {
+			return fmt.Errorf("failed to move VF %s to hostNS %s: %v", containerIfaceName, hostNS, err)
+		}
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // configureContainerLinkVeth creates a veth pair: one in the container netns and one in the host netns, and configures IP

@@ -574,7 +574,7 @@ func TestSRIOVNetwork(t *testing.T) {
 
 func (data *testData) assertVFName(t *testing.T, e2eTestData *antreae2e.TestData, vfName, podName, nodeName, ns string) error {
 	//  Delete a Pod and check the VF device is recovered with the original interface name.
-	err := e2eTestData.DeletePodAndWait(5*time.Second, ns, podName)
+	err := e2eTestData.DeletePodAndWait(5*time.Second, podName, ns)
 	if err == nil {
 		recoveredVFName := GetVFInterfaceName(t, e2eTestData, nodeName)
 		logs.Infof("The recovered VF interface name is %s on Node %s", recoveredVFName, nodeName)
@@ -584,10 +584,13 @@ func (data *testData) assertVFName(t *testing.T, e2eTestData *antreae2e.TestData
 }
 
 func GetVFInterfaceName(t *testing.T, e2eTestData *antreae2e.TestData, nodeName string) string {
-	cmd := "ip -d link show | grep -B1 0000:00:04.0 | head -n 1 | awk -F: '{print $2}' | xargs"
-	_, vfName, _, err := e2eTestData.RunCommandOnNode(nodeName, cmd)
+	cmd := "ip -d link show"
+	_, stdout, stderr, err := e2eTestData.RunCommandOnNode(nodeName, cmd)
+	logs.Infof("output %s: stderr: %s, err: %v", stdout, stderr, err)
+	cmd = "ip -d link show | grep -B1 0000:00:04.0 | head -n 1 | awk -F: '{print $2}' | xargs"
+	_, vfName, stderr, err := e2eTestData.RunCommandOnNode(nodeName, cmd)
 	if err != nil {
-		t.Fatalf("Error when checking the VF interface name on the Node %s: %v", nodeName, err)
+		t.Fatalf("Error when checking the VF interface name on the Node %s: %v, stderr: %v", nodeName, err, stderr)
 	}
 	return vfName
 }

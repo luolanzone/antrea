@@ -88,7 +88,7 @@ func getPodContainerDeviceIDs(podName string, podNamespace string) (map[string][
 			}
 		}
 	}
-	klog.V(2).InfoS("Retrieved Pod container device IDs", "pod", klog.KRef(podNamespace, podName), "deviceIDs", podDeviceIDs)
+	klog.InfoS("Retrieved Pod container device IDs", "pod", klog.KRef(podNamespace, podName), "deviceIDs", podDeviceIDs)
 	return podDeviceIDs, nil
 }
 
@@ -153,7 +153,9 @@ func (pc *PodController) assignUnusedSriovVFDeviceID(podName, podNamespace, reso
 	if err != nil {
 		return "", err
 	}
+	klog.InfoS("cache", len(cache))
 	for idx := range cache {
+		klog.InfoS("cache", "cache[idx].resourceName", cache[idx].resourceName, "cache[idx].ifName", cache[idx].ifName)
 		if cache[idx].resourceName == resourceName && cache[idx].ifName == "" {
 			// Unused PCI address found. Associate PCI address to the interface.
 			cache[idx].ifName = interfaceName

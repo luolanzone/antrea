@@ -755,6 +755,7 @@ func (pc *PodController) initializeSRIOVSecondaryInterfaceStore() error {
 			klog.ErrorS(err, "Failed to get Pod", "Pod", podRef)
 			continue
 		}
+		klog.InfoS("checking pod", "pod", podRef)
 		_, found := checkForPodSecondaryNetworkAttachment(pod)
 		if !found {
 			klog.V(2).InfoS("Pod does not have a NetworkAttachmentDefinition", "Pod", podRef)
@@ -781,6 +782,7 @@ func (pc *PodController) initializeSRIOVSecondaryInterfaceStore() error {
 					continue
 				}
 				cache[idx].ifName = status.Interface
+				klog.InfoS("cache", "cache[idx].ifName", cache[idx].ifName, "cache[idx].vfDeviceID", cache[idx].vfDeviceID)
 				// Add the interface to the Secondary interfaceStore.
 				containerMAC, _ := net.ParseMAC(status.Mac)
 				secondaryInterfaceConfig := interfacestore.NewContainerInterface(

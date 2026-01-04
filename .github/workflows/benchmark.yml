@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Git branch to run benchmarks on'
+        required: false
+        default: main
 
 jobs:
   go-benchmark-checks:

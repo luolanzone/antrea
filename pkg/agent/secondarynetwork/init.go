@@ -16,6 +16,7 @@ package secondarynetwork
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/ovsdb"
 	netdefclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -88,6 +89,23 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 
 func (c *Controller) AllowCNIDelete(podName, podNamespace string) bool {
 	return c.podController.AllowCNIDelete(podName, podNamespace)
+}
+
+// RegisterPodSecondaryNetworkWait registers a buffered result channel for containerID
+// so the CNI server can wait for secondary network setup to finish.
+func (c *Controller) RegisterPodSecondaryNetworkWait(containerID string) {
+	c.podController.RegisterPodSecondaryNetworkWait(containerID)
+}
+
+// WaitForPodSecondaryNetworkReady blocks until all secondary network interfaces for
+// containerID are configured, or until timeout elapses.
+func (c *Controller) WaitForPodSecondaryNetworkReady(containerID string, timeout time.Duration) error {
+	return c.podController.WaitForPodSecondaryNetworkReady(containerID, timeout)
+}
+
+// CancelPodSecondaryNetworkWait cancels the pending wait for containerID.
+func (c *Controller) CancelPodSecondaryNetworkWait(containerID string) {
+	c.podController.CancelPodSecondaryNetworkWait(containerID)
 }
 
 // CreateNetworkAttachDefClient creates net-attach-def client handle from the given config.

@@ -58,6 +58,11 @@ const (
 	numWorkers     = 4
 	// Set resyncPeriod to 0 to disable resyncing.
 	resyncPeriod = 0 * time.Minute
+
+	// secondaryNetworkReadyTimeout is the time that CNI CmdAdd will wait for all
+	// secondary network interfaces of a Pod to be configured after the primary
+	// network is set up. If the timeout elapses, Pod creation fails.
+	secondaryNetworkReadyTimeout = 45 * time.Second
 )
 
 const (
@@ -86,6 +91,12 @@ type podCNIInfo struct {
 	netNS       string
 }
 
+// secondaryNetworkResult carries the result of secondary network configuration
+// for a Pod. It is sent on a per-containerID channel that the CNI server waits on.
+type secondaryNetworkResult struct {
+	err error
+}
+
 type PodController struct {
 	kubeClient            clientset.Interface
 	netAttachDefClient    netdefclient.K8sCniCncfIoV1Interface
@@ -103,6 +114,11 @@ type PodController struct {
 	cniCache           sync.Map
 	vfDeviceIDUsageMap sync.Map
 	nodeConfig         *config.NodeConfig
+	// podSecondaryNetworkWait maps containerID to a buffered result channel that is
+	// written when secondary network configuration for that container completes. The
+	// CNI server registers a channel before waiting; the worker signals it on
+	// completion or error.
+	podSecondaryNetworkWait sync.Map
 }
 
 func NewPodController(
@@ -211,7 +227,13 @@ func (pc *PodController) processCNIUpdate(e interface{}) {
 
 // handleAddUpdatePod handles Pod Add, Update events and updates annotation if required.
 func (pc *PodController) handleAddUpdatePod(pod *corev1.Pod, podCNIInfo *podCNIInfo, storedSecondaryInterfaces []*interfacestore.InterfaceConfig) error {
-	if len(pod.Status.PodIPs) == 0 {
+	// cniWaiting is true when the CNI server has registered a wait channel for this
+	// container, meaning it is blocking in CmdAdd waiting for secondary network setup.
+	// In that case we proceed even if pod.Status.PodIPs is not yet set, because the
+	// primary CNI has already finished and we have the container netNS available.
+	cniWaiting := podCNIInfo != nil && pc.hasPodSecondaryNetworkWait(podCNIInfo.containerID)
+
+	if len(pod.Status.PodIPs) == 0 && !cniWaiting {
 		// Primary network configuration is not complete yet. Return nil here to dequeue the
 		// Pod event. Secondary network configuration will be handled with the following Pod
 		// update events.
@@ -230,6 +252,10 @@ func (pc *PodController) handleAddUpdatePod(pod *corev1.Pod, podCNIInfo *podCNII
 			klog.ErrorS(err, "Error when parsing network annotation", "annotation", secondaryNetwork)
 			// Do not return an error as a retry is not appropriate.
 			// When the annotation is fixed, the Pod will be enqueued again.
+			// Signal failure to the waiting CNI server so it can fail quickly.
+			if cniWaiting {
+				pc.signalSecondaryNetworkReady(podCNIInfo.containerID, err)
+			}
 			return nil
 		}
 	}
@@ -240,6 +266,10 @@ func (pc *PodController) handleAddUpdatePod(pod *corev1.Pod, podCNIInfo *podCNII
 			// secondary interface has been created for the Pod.
 			klog.V(1).InfoS("Secondary network already configured on this Pod. Changes to secondary network configuration are not supported, skipping update",
 				"Pod", klog.KObj(pod))
+			// Signal success: secondary interfaces are already set up.
+			if cniWaiting {
+				pc.signalSecondaryNetworkReady(podCNIInfo.containerID, nil)
+			}
 			return nil
 		}
 		if err := pc.removeInterfaces(storedSecondaryInterfaces); err != nil {
@@ -248,12 +278,22 @@ func (pc *PodController) handleAddUpdatePod(pod *corev1.Pod, podCNIInfo *podCNII
 	}
 
 	var netStatus []netdefv1.NetworkStatus
+	var configErr error
 	if len(networkList) > 0 {
-		var err error
-		netStatus, err = pc.configurePodSecondaryNetwork(pod, networkList, podCNIInfo)
-		if err != nil {
-			return err
+		netStatus, configErr = pc.configurePodSecondaryNetwork(pod, networkList, podCNIInfo)
+		if configErr != nil {
+			// Signal the error back to the waiting CNI server before returning.
+			if cniWaiting {
+				pc.signalSecondaryNetworkReady(podCNIInfo.containerID, configErr)
+			}
+			return configErr
 		}
+	}
+
+	// Signal success to the CNI server: secondary interfaces are now ready (or
+	// there were none to configure).
+	if cniWaiting {
+		pc.signalSecondaryNetworkReady(podCNIInfo.containerID, nil)
 	}
 
 	if netStatus != nil {
@@ -684,6 +724,64 @@ func (pc *PodController) Run(stopCh <-chan struct{}) {
 	}
 
 	<-stopCh
+}
+
+// RegisterPodSecondaryNetworkWait registers a buffered result channel for the given
+// containerID so that the CNI server can wait for secondary network setup to finish.
+// It must be called before WaitForPodSecondaryNetworkReady.
+func (pc *PodController) RegisterPodSecondaryNetworkWait(containerID string) {
+	// Buffer size 1 so that the worker can send without blocking even if the
+	// waiter has already timed out and stopped listening.
+	ch := make(chan secondaryNetworkResult, 1)
+	pc.podSecondaryNetworkWait.Store(containerID, ch)
+}
+
+// WaitForPodSecondaryNetworkReady blocks until secondary network configuration for
+// containerID completes or the timeout elapses. An error is returned if configuration
+// failed or timed out.
+func (pc *PodController) WaitForPodSecondaryNetworkReady(containerID string, timeout time.Duration) error {
+	v, ok := pc.podSecondaryNetworkWait.Load(containerID)
+	if !ok {
+		// No secondary networks expected for this container.
+		return nil
+	}
+	ch := v.(chan secondaryNetworkResult)
+	defer pc.podSecondaryNetworkWait.Delete(containerID)
+	select {
+	case result := <-ch:
+		return result.err
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out waiting for secondary network interfaces to be configured for container %s", containerID)
+	}
+}
+
+// CancelPodSecondaryNetworkWait cancels and removes the pending wait channel for
+// the given containerID. It should be called during CNI rollback or deletion.
+func (pc *PodController) CancelPodSecondaryNetworkWait(containerID string) {
+	pc.podSecondaryNetworkWait.Delete(containerID)
+}
+
+// hasPodSecondaryNetworkWait returns true when the CNI server has registered a
+// pending wait channel for the given containerID.
+func (pc *PodController) hasPodSecondaryNetworkWait(containerID string) bool {
+	_, ok := pc.podSecondaryNetworkWait.Load(containerID)
+	return ok
+}
+
+// signalSecondaryNetworkReady signals the result channel registered for containerID
+// (if any). This unblocks the CNI server waiting in WaitForPodSecondaryNetworkReady.
+func (pc *PodController) signalSecondaryNetworkReady(containerID string, err error) {
+	v, ok := pc.podSecondaryNetworkWait.Load(containerID)
+	if !ok {
+		return
+	}
+	ch := v.(chan secondaryNetworkResult)
+	// Non-blocking send: the channel has a buffer of 1, and once the waiter
+	// has timed out it no longer reads from the channel.
+	select {
+	case ch <- secondaryNetworkResult{err: err}:
+	default:
+	}
 }
 
 func checkForPodSecondaryNetworkAttachment(pod *corev1.Pod) (string, bool) {

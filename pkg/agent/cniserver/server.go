@@ -29,6 +29,7 @@ import (
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"google.golang.org/grpc"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -58,6 +59,16 @@ const (
 	// https://github.com/kubernetes/kubernetes/blob/v1.19.3/staging/src/k8s.io/kubelet/config/v1beta1/types.go#L451
 	// networkReadyTimeout is set to a shorter time so it returns a clear message to the runtime.
 	networkReadyTimeout = 30 * time.Second
+
+	// secondaryNetworkReadyTimeout is the maximum time CmdAdd will wait for all
+	// secondary network interfaces of a Pod to be configured after the primary
+	// interface is set up. It must be shorter than the kubelet CNI timeout (2 minutes)
+	// and accounts for IPAM allocation and OVS port creation latency.
+	secondaryNetworkReadyTimeout = 45 * time.Second
+
+	// networkAttachmentAnnotation is the annotation key that Pods use to request
+	// additional network interfaces via NetworkAttachmentDefinitions.
+	networkAttachmentAnnotation = "k8s.v1.cni.cncf.io/networks"
 )
 
 // containerAccessArbitrator is used to ensure that concurrent goroutines cannot perform operations
@@ -129,6 +140,10 @@ type CNIServer struct {
 	podNetworkWait *wait.Group
 	// flowRestoreCompleteWait will be decremented and Pod reconciliation is completed.
 	flowRestoreCompleteWait *wait.Group
+	// secondaryNetworkNotifier allows CmdAdd to wait for secondary network interfaces
+	// to be configured before returning success. When set, Pod creation fails if any
+	// required secondary interface cannot be configured.
+	secondaryNetworkNotifier agenttypes.SecondaryNetworkReadyNotifier
 }
 
 var supportedCNIVersionSet map[string]bool
@@ -430,6 +445,27 @@ func (s *CNIServer) ipamCheck(cniConfig *CNIConfig) (*cnipb.CniCmdResponse, erro
 	return &cnipb.CniCmdResponse{CniResult: []byte("")}, nil
 }
 
+// podHasSecondaryNetworkAnnotation returns true if the Pod identified by name and
+// namespace has the network-attachment annotation that requests secondary interfaces.
+// It queries the local pod informer cache, so no API server call is needed.
+func (s *CNIServer) podHasSecondaryNetworkAnnotation(podName, podNamespace string) bool {
+	podKey := podNamespace + "/" + podName
+	item, exists, err := s.podInformer.GetIndexer().GetByKey(podKey)
+	if err != nil || !exists {
+		return false
+	}
+	pod, ok := item.(*corev1.Pod)
+	if !ok {
+		return false
+	}
+	annotations := pod.GetAnnotations()
+	if annotations == nil {
+		return false
+	}
+	v, ok := annotations[networkAttachmentAnnotation]
+	return ok && v != ""
+}
+
 func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*cnipb.CniCmdResponse, error) {
 	klog.InfoS("Received CmdAdd request", "request", request)
 	cniConfig, response := s.validateRequestMessage(request)
@@ -512,6 +548,17 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 	// Setup pod interfaces and connect to ovs bridge
 	podName := string(cniConfig.K8S_POD_NAME)
 	podNamespace := string(cniConfig.K8S_POD_NAMESPACE)
+
+	// If the secondary network notifier is configured and the Pod has secondary
+	// network annotations, register a wait channel before setting up the primary
+	// interface. The secondary network controller will signal completion after it
+	// configures (or fails to configure) the secondary interfaces.
+	waitForSecondaryNetwork := s.secondaryNetworkNotifier != nil && isInfraContainer &&
+		s.podHasSecondaryNetworkAnnotation(podName, podNamespace)
+	if waitForSecondaryNetwork {
+		s.secondaryNetworkNotifier.RegisterPodSecondaryNetworkWait(cniConfig.ContainerId)
+	}
+
 	if err = s.podConfigurator.configureInterfaces(
 		podName,
 		podNamespace,
@@ -526,8 +573,21 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 		nil,
 	); err != nil {
 		klog.ErrorS(err, "Failed to configure interfaces for container", "container", cniConfig.ContainerId)
+		if waitForSecondaryNetwork {
+			s.secondaryNetworkNotifier.CancelPodSecondaryNetworkWait(cniConfig.ContainerId)
+		}
 		return s.configInterfaceFailureResponse(err), nil
 	}
+
+	if waitForSecondaryNetwork {
+		klog.V(2).InfoS("Waiting for secondary network interfaces to be configured", "Pod", klog.KRef(podNamespace, podName), "container", cniConfig.ContainerId)
+		if err = s.secondaryNetworkNotifier.WaitForPodSecondaryNetworkReady(cniConfig.ContainerId, secondaryNetworkReadyTimeout); err != nil {
+			klog.ErrorS(err, "Secondary network interface configuration failed", "Pod", klog.KRef(podNamespace, podName), "container", cniConfig.ContainerId)
+			return s.configInterfaceFailureResponse(err), nil
+		}
+		klog.V(2).InfoS("Secondary network interfaces configured successfully", "Pod", klog.KRef(podNamespace, podName), "container", cniConfig.ContainerId)
+	}
+
 	cniVersion := cniConfig.CNIVersion
 	cniResult, _ := result.Result.GetAsVersion(cniVersion)
 
@@ -655,6 +715,7 @@ func New(
 	networkConfig *config.NetworkConfig,
 	podNetworkWait, flowRestoreCompleteWait *wait.Group,
 	cniDeleteChecker agenttypes.CNIDeleteChecker,
+	secondaryNetworkNotifier agenttypes.SecondaryNetworkReadyNotifier,
 ) *CNIServer {
 	return &CNIServer{
 		cniSocket:                  cniSocket,
@@ -673,6 +734,7 @@ func New(
 		podNetworkWait:             podNetworkWait,
 		flowRestoreCompleteWait:    flowRestoreCompleteWait.Increment(),
 		cniDeleteChecker:           cniDeleteChecker,
+		secondaryNetworkNotifier:   secondaryNetworkNotifier,
 	}
 }
 

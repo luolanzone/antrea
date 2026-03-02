@@ -615,6 +615,8 @@ func run(o *Options) error {
 
 	var secondaryNetworkController *secondarynetwork.Controller
 	var cniDeleteChecker agenttypes.CNIDeleteChecker
+	var secondaryNetworkNotifier agenttypes.SecondaryNetworkReadyNotifier
+
 	cniDeleteChecker = nil
 	// Secondary network controller should be created before CNIServer.Run() to make sure no Pod CNI updates will be missed.
 	if features.DefaultFeatureGate.Enabled(features.SecondaryNetwork) {
@@ -627,6 +629,7 @@ func run(o *Options) error {
 			return fmt.Errorf("failed to create secondary network controller: %w", err)
 		}
 		cniDeleteChecker = secondaryNetworkController
+		secondaryNetworkNotifier = secondaryNetworkController
 	}
 
 	if o.nodeType == config.K8sNode {
@@ -645,7 +648,8 @@ func run(o *Options) error {
 			networkConfig,
 			podNetworkWait,
 			flowRestoreCompleteWait,
-			cniDeleteChecker)
+			cniDeleteChecker,
+			secondaryNetworkNotifier)
 
 		err = cniServer.Initialize(ovsBridgeClient, ofClient, ifaceStore, podUpdateChannel)
 		if err != nil {

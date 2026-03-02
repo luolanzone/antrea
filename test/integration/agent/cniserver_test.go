@@ -582,6 +582,7 @@ func newTester() *cmdAddDelTester {
 		tester.podNetworkWait.Increment(),
 		tester.flowRestoreCompleteWait,
 		nil,
+		nil,
 	)
 	tester.server.Initialize(ovsServiceMock, ofServiceMock, ifaceStore, channel.NewSubscribableChannel("PodUpdate", 100))
 	ctx := context.Background()
@@ -749,7 +750,7 @@ func setupChainTest(
 			k8sFake.NewSimpleClientset(),
 			routeMock,
 			true, false, false, false, &config.NetworkConfig{InterfaceMTU: 1450},
-			podNetworkWait, flowRestoreCompleteWait, nil)
+			podNetworkWait, flowRestoreCompleteWait, nil, nil)
 	} else {
 		server = inServer
 	}
@@ -940,7 +941,7 @@ func TestCNIServerGCForHostLocalIPAM(t *testing.T) {
 		k8sClient,
 		routeMock,
 		false, false, false, false, &config.NetworkConfig{InterfaceMTU: 1450},
-		podNetworkWait, flowRestoreCompleteWait, nil,
+		podNetworkWait, flowRestoreCompleteWait, nil, nil,
 	)
 
 	// call Initialize, which will run reconciliation and perform host-local IPAM garbage collection

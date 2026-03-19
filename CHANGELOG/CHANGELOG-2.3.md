@@ -1,5 +1,22 @@
 # Changelog 2.3
 
+## 2.3.3 - 2026-03-19
+
+### Changed
+
+- Upgrade Go to 1.24. ([#7023](https://github.com/antrea-io/antrea/pull/7023), [@antoninbas])
+- Improve logging in NodePortLocal controller. ([#7204](https://github.com/antrea-io/antrea/pull/7204), [@antoninbas])
+- Remove unnecessary logs about NPL cleanup. ([#7221](https://github.com/antrea-io/antrea/pull/7221), [@tnqn])
+
+### Fixed
+
+- Update module golang.org/x/crypto to v0.45.0 [SECURITY]. ([#7573](https://github.com/antrea-io/antrea/pull/7573), [@antoninbas])
+- Fix conformance failures for netpol v2. ([#7563](https://github.com/antrea-io/antrea/pull/7563), [@Dyanngg])
+- Fix panic in monitor controller caused by unexpected delete event type. ([#7568](https://github.com/antrea-io/antrea/pull/7568), [@luolanzone])
+- [NodePortLocal] Handle missing Pod IP and Pod IP changes. ([#7512](https://github.com/antrea-io/antrea/pull/7512), [@antoninbas])
+- Exclude Egress VLAN sub-interface (antrea-ext.VLAN) from NodePort. ([#7519](https://github.com/antrea-io/antrea/pull/7519), [@antoninbas])
+- Fix type assertion panic in GetFlowTableID. ([#7515](https://github.com/antrea-io/antrea/pull/7515), [@antoninbas])
+
 ## 2.3.2 - 2025-10-14
 
 ### Fixed

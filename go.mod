@@ -128,7 +128,7 @@ require (
 	github.com/contiv/libovsdb v0.0.0-20170227191248-d0061a53e358 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.6.0 // indirect
-	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
+	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
 	github.com/eapache/channels v1.1.0 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect

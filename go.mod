@@ -92,7 +92,7 @@ require (
 	cel.dev/expr v0.25.1 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/ClickHouse/ch-go v0.66.0 // indirect
-	github.com/MakeNowJust/heredoc v1.0.0 // indirect
+	github.com/MakeNowJust/heredoc/v2 v2.0.0 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/NYTimes/gziphandler v1.1.1 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect

@@ -38,8 +38,8 @@ require (
 	github.com/mdlayher/ndp v1.1.0
 	github.com/mdlayher/packet v1.1.2
 	github.com/miekg/dns v1.1.72
-	github.com/onsi/ginkgo/v2 v2.28.3
-	github.com/onsi/gomega v1.40.0
+	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/gomega v1.41.0
 	github.com/osrg/gobgp/v3 v3.37.0
 	github.com/pkg/sftp v1.13.10
 	github.com/prometheus/client_golang v1.23.2

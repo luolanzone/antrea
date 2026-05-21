@@ -8,6 +8,6 @@ spec:
   leaders:
     - clusterID: test-cluster-leader
       secret: leader-access-token
-      server: https://<LEADER_CLUSTER_IP>:6443
+      server: https://172.18.0.2:6443
   namespace: antrea-multicluster
 

@@ -1306,7 +1306,7 @@ data:
       port: 9443
     serviceCIDR: ""
     podCIDRs:
-      - ""
+      - 10.244.32.0/20
     gatewayIPPrecedence: "private"
     endpointIPType: "ClusterIP"
     enableStretchedNetworkPolicy: true
@@ -1349,7 +1349,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: 6d32cccc336d53da01bb738c2bcd39678aa0224c6aeede799e48edc2c2d2a7d7
+        checksum/config: checksum-placeholder
       labels:
         app: antrea
         component: antrea-mc-controller

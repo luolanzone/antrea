@@ -1,0 +1,7 @@
+multicluster:
+  enableGateway: true
+  enableStretchedNetworkPolicy: true
+  enablePodToPodConnectivity: true
+featureGates: {
+  Multicluster: true
+}

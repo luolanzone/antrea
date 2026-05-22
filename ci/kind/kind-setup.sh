@@ -146,12 +146,12 @@ function configure_networks {
     rm_nodes=$(docker network inspect $n --format '{{range $i, $conf:=.Containers}}{{$conf.Name}} {{end}}')
     for rn in $rm_nodes; do
       if [[  $nodes =~ $rn ]]; then
-        docker network disconnect $n $rn > /dev/null 2>&1
+        docker network disconnect $n $rn > /dev/null 2>&1 || true
         echo "disconnected worker $rn from network $n"
       fi
     done
     if [[ $n != "$cluster_name" ]]; then
-      docker network rm $n > /dev/null 2>&1
+      docker network rm $n > /dev/null 2>&1 || true
       echo "removed network $n"
     fi
   done

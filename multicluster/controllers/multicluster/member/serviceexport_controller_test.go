@@ -287,12 +287,16 @@ func TestServiceExportReconciler_CheckExportStatus(t *testing.T) {
 				if err != nil {
 					t.Errorf("ServiceExport Reconciler should get new ServiceExport successfully but got error = %v", err)
 				} else {
-					reason := newSvcExport.Status.Conditions[0].Reason
-					if reason != "" && reason != tt.expectedReason {
-						t.Errorf("Expected ServiceExport status should be %s but got %v", tt.expectedReason, reason)
-					}
-					if tt.expectedMessage != "" && tt.expectedMessage != newSvcExport.Status.Conditions[0].Message {
-						t.Errorf("Expected message %s but got %s", tt.expectedMessage, newSvcExport.Status.Conditions[0].Message)
+					if len(newSvcExport.Status.Conditions) == 0 {
+						t.Errorf("Expected at least one condition but got none")
+					} else {
+						reason := newSvcExport.Status.Conditions[0].Reason
+						if reason != tt.expectedReason {
+							t.Errorf("Expected ServiceExport status reason should be %s but got %v", tt.expectedReason, reason)
+						}
+						if tt.expectedMessage != "" && tt.expectedMessage != newSvcExport.Status.Conditions[0].Message {
+							t.Errorf("Expected message %s but got %s", tt.expectedMessage, newSvcExport.Status.Conditions[0].Message)
+						}
 					}
 				}
 			}

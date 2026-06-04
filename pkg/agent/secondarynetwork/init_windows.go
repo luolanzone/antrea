@@ -32,14 +32,7 @@ func (c *Controller) Restore() {
 	// Not supported on Windows.
 }
 
-func (c *Controller) reconcileBridge() error {
-	// Not supported on Windows.
-	return nil
-}
-
-func (c *Controller) Run(stopCh <-chan struct{}) {
-	return
-}
+func (c *Controller) Run(stopCh <-chan struct{}) {}
 
 func resolveAndCreateOVSBridge(
 	effectiveBridge func() *agenttypes.OVSBridgeConfig,

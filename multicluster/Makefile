@@ -48,6 +48,8 @@ help: ## Display this help.
 
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=controller-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	perl -0pi -e 's/^[ ]*controller-gen\.kubebuilder\.io\/version: v[^\n]+\n//mg;' \
+		-e 's/^([ ]*)annotations:\n(?=\1\S|\z)//mg' config/crd/bases/*.yaml
 	$(CURDIR)/hack/generate-manifest.sh -g > build/yamls/antrea-multicluster-leader-global.yml
 	$(CURDIR)/hack/generate-manifest.sh -n antrea-multicluster > build/yamls/antrea-multicluster-leader-namespaced.yml
 	$(CURDIR)/hack/generate-manifest.sh -l antrea-multicluster > build/yamls/antrea-multicluster-leader.yml

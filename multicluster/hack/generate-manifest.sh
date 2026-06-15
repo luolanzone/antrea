@@ -41,6 +41,10 @@ function print_help {
     echoerr "Try '$0 --help' for more information."
 }
 
+function strip_controller_gen_version {
+    perl -0pe 's/^[ ]*controller-gen\.kubebuilder\.io\/version: v[^\n]+\n//mg; s/^([ ]*)annotations:\n(?=\1\S|\z)//mg'
+}
+
 OVERLAY=member
 NAMESPACE=antrea-multicluster
 MODE=""
@@ -158,5 +162,5 @@ if [ "$OVERLAY" == "member" ] && $COVERAGE; then
     $KUSTOMIZE edit add patch --path ./manager_command_patch_coverage.yaml
 fi
 
-$KUSTOMIZE build
+$KUSTOMIZE build | strip_controller_gen_version
 rm -rf $TMP_DIR

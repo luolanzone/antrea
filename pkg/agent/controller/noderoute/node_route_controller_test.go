@@ -266,6 +266,61 @@ func TestLookupIPInPodSubnets(t *testing.T) {
 	}
 }
 
+func TestGetNodeIPForPodIP(t *testing.T) {
+	c := newController(t, &config.NetworkConfig{})
+	defer c.queue.ShutDown()
+
+	nodeIPv6 := net.ParseIP("2001:db8::10")
+	require.NoError(t, c.installedNodes.Add(&nodeRouteInfo{
+		nodeName: "node1",
+		podCIDRs: []*net.IPNet{podCIDR1, podCIDR1v6},
+		nodeIPs: &utilip.DualStackIPs{
+			IPv4: nodeIP1,
+			IPv6: nodeIPv6,
+		},
+	}))
+	for _, podCIDR := range []*net.IPNet{podCIDR1, podCIDR1v6} {
+		prefix, _ := cidrToPrefix(podCIDR)
+		c.podSubnets.Insert(prefix)
+	}
+
+	testCases := []struct {
+		name       string
+		podIP      string
+		expectedIP net.IP
+		found      bool
+	}{
+		{
+			name:       "remote IPv4 Pod",
+			podIP:      "1.1.1.101",
+			expectedIP: nodeIP1,
+			found:      true,
+		},
+		{
+			name:       "remote IPv6 Pod",
+			podIP:      "2001:4860:0001::101",
+			expectedIP: nodeIPv6,
+			found:      true,
+		},
+		{
+			name:  "local Pod",
+			podIP: "1.1.0.101",
+		},
+		{
+			name:  "unknown IP",
+			podIP: "1.1.10.101",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			nodeIP, found := c.Controller.GetNodeIPForPodIP(netip.MustParseAddr(tc.podIP))
+			assert.Equal(t, tc.found, found)
+			assert.Equal(t, tc.expectedIP, nodeIP)
+		})
+	}
+}
+
 func BenchmarkLookupIPInPodSubnets(b *testing.B) {
 	c := newController(b, &config.NetworkConfig{})
 	defer c.queue.ShutDown()
@@ -404,20 +459,20 @@ func TestCreateIPSecTunnelPortPSK(t *testing.T) {
 	c.ovsClient.EXPECT().CreateTunnelPortExt(
 		node1PortName, ovsconfig.TunnelType("vxlan"), int32(0),
 		false, "", nodeIP1.String(), "", "changeme", nil,
-		map[string]interface{}{ovsExternalIDNodeName: "xyz-k8s-0-1",
+		map[string]string{ovsExternalIDNodeName: "xyz-k8s-0-1",
 			interfacestore.AntreaInterfaceTypeKey: interfacestore.AntreaIPsecTunnel,
 		}).Times(1)
 	c.ovsClient.EXPECT().CreateTunnelPortExt(
 		node2PortName, ovsconfig.TunnelType("vxlan"), int32(0),
 		false, "", nodeIP2.String(), "", "changeme", nil,
-		map[string]interface{}{ovsExternalIDNodeName: "xyz-k8s-0-2",
+		map[string]string{ovsExternalIDNodeName: "xyz-k8s-0-2",
 			interfacestore.AntreaInterfaceTypeKey: interfacestore.AntreaIPsecTunnel,
 		}).Times(1)
-	c.ovsClient.EXPECT().GetOFPort(node1PortName, false).Return(int32(1), nil)
+	c.ovsClient.EXPECT().GetOFPort(node1PortName).Return(int32(1), nil)
 	c.ovsCtlClient.EXPECT().SetPortNoFlood(1)
-	c.ovsClient.EXPECT().GetOFPort(node2PortName, false).Return(int32(2), nil)
+	c.ovsClient.EXPECT().GetOFPort(node2PortName).Return(int32(2), nil)
 	c.ovsCtlClient.EXPECT().SetPortNoFlood(2)
-	c.ovsClient.EXPECT().GetOFPort(node3PortName, false).Return(int32(5), nil)
+	c.ovsClient.EXPECT().GetOFPort(node3PortName).Return(int32(5), nil)
 	c.ovsCtlClient.EXPECT().SetPortNoFlood(5)
 	c.ovsClient.EXPECT().DeletePort("123").Times(1)
 
@@ -474,10 +529,10 @@ func TestCreateIPSecTunnelPortCert(t *testing.T) {
 	c.ovsClient.EXPECT().CreateTunnelPortExt(
 		node1PortName, ovsconfig.TunnelType("vxlan"), int32(0),
 		false, "", nodeIP1.String(), "xyz-k8s-0-1", "", nil,
-		map[string]interface{}{ovsExternalIDNodeName: "xyz-k8s-0-1",
+		map[string]string{ovsExternalIDNodeName: "xyz-k8s-0-1",
 			interfacestore.AntreaInterfaceTypeKey: interfacestore.AntreaIPsecTunnel,
 		}).Times(1)
-	c.ovsClient.EXPECT().GetOFPort(node1PortName, false).Return(int32(1), nil)
+	c.ovsClient.EXPECT().GetOFPort(node1PortName).Return(int32(1), nil)
 	c.ovsCtlClient.EXPECT().SetPortNoFlood(1)
 
 	tests := []struct {

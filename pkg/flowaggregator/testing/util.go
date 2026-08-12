@@ -28,12 +28,16 @@ func PrepareTestFlowRecord(isIPv4 bool) *flowpb.Flow {
 	source := netip.MustParseAddr("10.10.0.79")
 	destination := netip.MustParseAddr("10.10.0.80")
 	destinationClusterIP := netip.MustParseAddr("10.10.1.10")
+	destinationServiceIP := netip.MustParseAddr("10.10.2.10")
+	proxySnatIP := netip.MustParseAddr("10.10.3.10")
 	egressIP := netip.MustParseAddr("172.18.0.1")
 	if !isIPv4 {
 		ipVersion = flowpb.IPVersion_IP_VERSION_6
 		source = netip.MustParseAddr("2001:0:3238:dfe1:63::fefb")
 		destination = netip.MustParseAddr("2001:0:3238:dfe1:63::fefc")
 		destinationClusterIP = netip.MustParseAddr("2001:0:3238:dfe1:64::a")
+		destinationServiceIP = netip.MustParseAddr("2001:0:3238:dfe1:65::a")
+		proxySnatIP = netip.MustParseAddr("2001:0:3238:dfe1:66::a")
 		egressIP = netip.MustParseAddr("2001:0:3238:dfe1::ac12:1")
 	}
 	return &flowpb.Flow{
@@ -81,6 +85,7 @@ func PrepareTestFlowRecord(isIPv4 bool) *flowpb.Flow {
 			},
 			DestinationNodeName:            "k8s-node-control-plane-b",
 			DestinationClusterIp:           destinationClusterIP.AsSlice(),
+			DestinationServiceIp:           destinationServiceIP.AsSlice(),
 			DestinationServicePort:         5202,
 			DestinationServicePortName:     "perftest",
 			IngressNetworkPolicyName:       "test-flow-aggregator-networkpolicy-ingress-allow",
@@ -116,10 +121,30 @@ func PrepareTestFlowRecord(isIPv4 bool) *flowpb.Flow {
 			EndTsFromDestination: &timestamppb.Timestamp{
 				Seconds: 1637706975,
 			},
-			StatsFromSource:                  &flowpb.Stats{},
-			ReverseStatsFromSource:           &flowpb.Stats{},
-			StatsFromDestination:             &flowpb.Stats{},
-			ReverseStatsFromDestination:      &flowpb.Stats{},
+			StatsFromSource: &flowpb.Stats{
+				PacketTotalCount: 101,
+				OctetTotalCount:  102,
+				PacketDeltaCount: 103,
+				OctetDeltaCount:  104,
+			},
+			ReverseStatsFromSource: &flowpb.Stats{
+				PacketTotalCount: 201,
+				OctetTotalCount:  202,
+				PacketDeltaCount: 203,
+				OctetDeltaCount:  204,
+			},
+			StatsFromDestination: &flowpb.Stats{
+				PacketTotalCount: 301,
+				OctetTotalCount:  302,
+				PacketDeltaCount: 303,
+				OctetDeltaCount:  304,
+			},
+			ReverseStatsFromDestination: &flowpb.Stats{
+				PacketTotalCount: 401,
+				OctetTotalCount:  402,
+				PacketDeltaCount: 403,
+				OctetDeltaCount:  404,
+			},
 			Throughput:                       15902813472,
 			ReverseThroughput:                12381344,
 			ThroughputFromSource:             15902813473,
@@ -127,6 +152,8 @@ func PrepareTestFlowRecord(isIPv4 bool) *flowpb.Flow {
 			ReverseThroughputFromSource:      12381345,
 			ReverseThroughputFromDestination: 12381346,
 		},
+		ProxySnatIp:   proxySnatIP.AsSlice(),
+		ProxySnatPort: 34000,
 		FlowDirection: flowpb.FlowDirection_FLOW_DIRECTION_UNKNOWN,
 	}
 }

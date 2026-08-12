@@ -98,7 +98,7 @@ type Controller struct {
 	ofClient               openflow.Client
 	networkPolicyQuerier   querier.AgentNetworkPolicyInfoQuerier
 	egressQuerier          querier.EgressQuerier
-	podSubnetChecker       PodSubnetChecker
+	nodeRouteQuerier       NodeRouteQuerier
 	interfaceStore         interfacestore.InterfaceStore
 	networkConfig          *config.NetworkConfig
 	nodeConfig             *config.NodeConfig
@@ -122,7 +122,7 @@ func NewTraceflowController(
 	client openflow.Client,
 	npQuerier querier.AgentNetworkPolicyInfoQuerier,
 	egressQuerier querier.EgressQuerier,
-	podSubnetChecker PodSubnetChecker,
+	nodeRouteQuerier NodeRouteQuerier,
 	interfaceStore interfacestore.InterfaceStore,
 	networkConfig *config.NetworkConfig,
 	nodeConfig *config.NodeConfig,
@@ -138,7 +138,7 @@ func NewTraceflowController(
 		ofClient:              client,
 		networkPolicyQuerier:  npQuerier,
 		egressQuerier:         egressQuerier,
-		podSubnetChecker:      podSubnetChecker,
+		nodeRouteQuerier:      nodeRouteQuerier,
 		interfaceStore:        interfaceStore,
 		networkConfig:         networkConfig,
 		nodeConfig:            nodeConfig,
@@ -488,6 +488,9 @@ func (c *Controller) preparePacket(tf *crdv1beta1.Traceflow, intf *interfacestor
 			return nil, errors.New("destination Service does not have a ClusterIP")
 		}
 		packet.DestinationIP = net.ParseIP(dstSvc.Spec.ClusterIP)
+		if packet.DestinationIP == nil {
+			return nil, errors.New("destination Service does not have a valid ClusterIP")
+		}
 		if !packet.IsIPv6 {
 			packet.DestinationIP = packet.DestinationIP.To4()
 			if packet.DestinationIP == nil {
@@ -497,6 +500,9 @@ func (c *Controller) preparePacket(tf *crdv1beta1.Traceflow, intf *interfacestor
 			return nil, errors.New("destination Service does not have an IPv6 ClusterIP")
 		}
 		if !liveTraffic {
+			if len(dstSvc.Spec.Ports) == 0 {
+				return nil, errors.New("destination Service does not have any ports")
+			}
 			switch dstSvc.Spec.Ports[0].Protocol {
 			case corev1.ProtocolTCP:
 				packet.IPProto = protocol.Type_TCP
@@ -615,9 +621,12 @@ func (c *Controller) cleanupTraceflow(tfName string) {
 	}
 }
 
-type PodSubnetChecker interface {
+// NodeRouteQuerier provides PodCIDR and peer Node information to Traceflow.
+type NodeRouteQuerier interface {
 	// LookupIPInPodSubnets returns two boolean values. The first one indicates whether the IP can be
 	// found in a PodCIDR for one of the cluster Nodes. The second one indicates whether the IP is used
 	// as a gateway IP. The second boolean value can only be true if the first one is true.
 	LookupIPInPodSubnets(ip netip.Addr) (isFound bool, isGWIP bool)
+	// GetNodeIPForPodIP returns the transport IP of the remote Node whose PodCIDR contains the IP.
+	GetNodeIPForPodIP(ip netip.Addr) (net.IP, bool)
 }

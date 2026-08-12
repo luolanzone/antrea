@@ -63,15 +63,18 @@ import (
 	"antrea.io/antrea/v2/pkg/apiserver/registry/system/supportbundle"
 	"antrea.io/antrea/v2/pkg/apiserver/storage"
 	crdv1a2informers "antrea.io/antrea/v2/pkg/client/informers/externalversions/crd/v1alpha2"
+	"antrea.io/antrea/v2/pkg/controller/antreanodeconfig"
 	"antrea.io/antrea/v2/pkg/controller/egress"
 	"antrea.io/antrea/v2/pkg/controller/externalippool"
 	"antrea.io/antrea/v2/pkg/controller/ipam"
 	controllernetworkpolicy "antrea.io/antrea/v2/pkg/controller/networkpolicy"
+	controllerpacketcapture "antrea.io/antrea/v2/pkg/controller/packetcapture"
 	"antrea.io/antrea/v2/pkg/controller/querier"
 	"antrea.io/antrea/v2/pkg/controller/stats"
 	controllerbundlecollection "antrea.io/antrea/v2/pkg/controller/supportbundlecollection"
 	"antrea.io/antrea/v2/pkg/controller/traceflow"
 	"antrea.io/antrea/v2/pkg/features"
+	"antrea.io/antrea/v2/pkg/util/env"
 )
 
 var (
@@ -319,10 +322,9 @@ func installHandlers(c *ExtraConfig, s *genericapiserver.GenericAPIServer) {
 		s.Handler.NonGoRestfulMux.HandleFunc("/validate/tier", webhook.HandlerForValidateFunc(v.Validate))
 		s.Handler.NonGoRestfulMux.HandleFunc("/validate/acnp", webhook.HandlerForValidateFunc(v.Validate))
 		s.Handler.NonGoRestfulMux.HandleFunc("/validate/annp", webhook.HandlerForValidateFunc(v.Validate))
-		s.Handler.NonGoRestfulMux.HandleFunc("/validate/anp", webhook.HandlerForValidateFunc(v.Validate))
-		s.Handler.NonGoRestfulMux.HandleFunc("/validate/banp", webhook.HandlerForValidateFunc(v.Validate))
 		s.Handler.NonGoRestfulMux.HandleFunc("/validate/clustergroup", webhook.HandlerForValidateFunc(v.Validate))
 		s.Handler.NonGoRestfulMux.HandleFunc("/validate/group", webhook.HandlerForValidateFunc(v.Validate))
+		s.Handler.NonGoRestfulMux.HandleFunc("/validate/cnp", webhook.HandlerForValidateFunc(v.Validate))
 
 		// Install a post start hook to initialize Tiers on start-up
 		s.AddPostStartHook("initialize-tiers", func(context genericapiserver.PostStartHookContext) error {
@@ -355,6 +357,20 @@ func installHandlers(c *ExtraConfig, s *genericapiserver.GenericAPIServer) {
 
 	if features.DefaultFeatureGate.Enabled(features.Traceflow) {
 		s.Handler.NonGoRestfulMux.HandleFunc("/validate/traceflow", webhook.HandlerForValidateFunc(c.traceflowController.Validate))
+	}
+
+	// Unlike the validators above, this one is registered unconditionally, even though
+	// PacketCapture is a feature gate. PacketCapture is an Agent-only feature gate: it is not
+	// part of ControllerGates and is never set in the antrea-controller configuration, so
+	// gating on it here would leave the handler permanently unregistered. Because the
+	// ValidatingWebhookConfiguration is always installed and its failurePolicy defaults to
+	// Fail, that would reject every PacketCapture CREATE / UPDATE request. The validator only
+	// needs the K8s client, which is always available, so there is nothing to gate on.
+	pcValidator := controllerpacketcapture.NewValidator(c.k8sClient, env.GetAntreaNamespace())
+	s.Handler.NonGoRestfulMux.HandleFunc("/validate/packetcapture", webhook.HandlerForValidateFunc(pcValidator.Validate))
+
+	if features.DefaultFeatureGate.Enabled(features.AntreaNodeConfig) {
+		s.Handler.NonGoRestfulMux.HandleFunc("/validate/antreanodeconfig", webhook.HandlerForValidateFunc(antreanodeconfig.Validate))
 	}
 }
 

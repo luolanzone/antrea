@@ -34,6 +34,7 @@ import (
 
 	mcinformers "antrea.io/antrea/v2/multicluster/pkg/client/informers/externalversions"
 	"antrea.io/antrea/v2/pkg/agent"
+	"antrea.io/antrea/v2/pkg/agent/antreanodeconfig"
 	"antrea.io/antrea/v2/pkg/agent/apiserver"
 	"antrea.io/antrea/v2/pkg/agent/client"
 	"antrea.io/antrea/v2/pkg/agent/cniserver"
@@ -60,6 +61,7 @@ import (
 	mcroute "antrea.io/antrea/v2/pkg/agent/multicluster"
 	"antrea.io/antrea/v2/pkg/agent/nodeip"
 	npl "antrea.io/antrea/v2/pkg/agent/nodeportlocal"
+	"antrea.io/antrea/v2/pkg/agent/nodeportlocal/portcache"
 	"antrea.io/antrea/v2/pkg/agent/openflow"
 	"antrea.io/antrea/v2/pkg/agent/packetcapture"
 	"antrea.io/antrea/v2/pkg/agent/proxy"
@@ -84,8 +86,10 @@ import (
 	"antrea.io/antrea/v2/pkg/ovs/ovsctl"
 	"antrea.io/antrea/v2/pkg/signals"
 	"antrea.io/antrea/v2/pkg/util/channel"
+	"antrea.io/antrea/v2/pkg/util/env"
 	"antrea.io/antrea/v2/pkg/util/k8s"
 	"antrea.io/antrea/v2/pkg/util/lazy"
+	"antrea.io/antrea/v2/pkg/util/memberlistkeys"
 	"antrea.io/antrea/v2/pkg/util/objectstore"
 	utilwait "antrea.io/antrea/v2/pkg/util/wait"
 	"antrea.io/antrea/v2/pkg/version"
@@ -112,6 +116,13 @@ var ipv4Localhost = net.ParseIP("127.0.0.1")
 // run starts Antrea agent with the given options and waits for termination signal.
 func run(o *Options) error {
 	klog.InfoS("Starting Antrea Agent", "version", version.GetFullVersion())
+
+	// Set up signal capture: the first SIGTERM / SIGINT signal is handled gracefully and will
+	// cause the stopCh channel to be closed; if another signal is received before the program
+	// exits, we will force exit.
+	stopCh := signals.RegisterSignalHandlers()
+	// Generate a context for functions which require one (instead of stopCh).
+	ctx := wait.ContextForChannel(stopCh)
 
 	// Create K8s Clientset, CRD Clientset, Multicluster CRD Clientset and SharedInformerFactory for the given config.
 	k8sClient, _, crdClient, _, mcClient, _, err := k8s.CreateClients(o.config.ClientConnection, o.config.KubeAPIServerOverride)
@@ -146,7 +157,7 @@ func run(o *Options) error {
 	}
 	// Create ovsdb and openflow clients.
 	ovsdbAddress := ovsconfig.GetConnAddress(o.config.OVSRunDir)
-	ovsdbConnection, err := ovsconfig.NewOVSDBConnectionUDS(ovsdbAddress)
+	ovsdbConnection, err := ovsconfig.NewOVSDBConnectionUDS(ctx, ovsdbAddress)
 	if err != nil {
 		// TODO: ovsconfig.NewOVSDBConnectionUDS might return timeout in the future, need to add retry
 		return fmt.Errorf("error connecting OVSDB: %v", err)
@@ -285,13 +296,6 @@ func run(o *Options) error {
 	// goroutine calls Done when deletion completes.
 	staleFlowsDeletedWait := utilwait.NewGroup().Increment()
 
-	// set up signal capture: the first SIGTERM / SIGINT signal is handled gracefully and will
-	// cause the stopCh channel to be closed; if another signal is received before the program
-	// exits, we will force exit.
-	stopCh := signals.RegisterSignalHandlers()
-	// Generate a context for functions which require one (instead of stopCh).
-	ctx := wait.ContextForChannel(stopCh)
-
 	if o.nodeType == config.K8sNode {
 		// Must start after registering all event handlers.
 		go serviceCIDRProvider.Run(stopCh)
@@ -299,12 +303,10 @@ func run(o *Options) error {
 
 	// Get all available NodePort addresses.
 	var nodePortAddressesIPv4, nodePortAddressesIPv6 []net.IP
-	if o.config.AntreaProxy.ProxyAll {
-		excludeNodePortDevices := append(excludeNodePortDevices, o.config.HostGateway)
-		nodePortAddressesIPv4, nodePortAddressesIPv6, err = getAvailableNodePortAddresses(o.config.AntreaProxy.NodePortAddresses, excludeNodePortDevices, excludeNodePortDevicePrefixes)
-		if err != nil {
-			return fmt.Errorf("getting available NodePort IP addresses failed: %v", err)
-		}
+	excludeNodePortDevices = append(excludeNodePortDevices, o.config.HostGateway)
+	nodePortAddressesIPv4, nodePortAddressesIPv6, err = getAvailableNodePortAddresses(o.config.AntreaProxy.NodePortAddresses, excludeNodePortDevices, excludeNodePortDevicePrefixes)
+	if err != nil {
+		return fmt.Errorf("getting available NodePort IP addresses failed: %v", err)
 	}
 	serviceConfig := &config.ServiceConfig{
 		ServiceCIDR:           serviceCIDRNet,
@@ -375,6 +377,9 @@ func run(o *Options) error {
 	// externalEntityUpdateChannel is a channel for receiving ExternalEntity updates from ExternalNodeController and
 	// notifying NetworkPolicyController to reconcile rules related to the updated ExternalEntities.
 	var externalEntityUpdateChannel *channel.SubscribableChannel
+	// antreaNodeConfigUpdateChannel broadcasts effective AntreaNodeConfig-derived state
+	// (e.g. secondary-network OVS bridge) to subscribers on the agent.
+	var antreaNodeConfigUpdateChannel *channel.SubscribableChannel
 	if o.nodeType == config.K8sNode {
 		podUpdateChannel = channel.NewSubscribableChannel("PodUpdate", 100)
 	} else {
@@ -576,8 +581,19 @@ func run(o *Options) error {
 		} else {
 			return fmt.Errorf("invalid Node Transport IPAddr in Node config: %v", nodeConfig)
 		}
+		// The gossip traffic of the memberlist cluster is authenticated and encrypted with a key
+		// shared by all the antrea-agents, distributed via the antrea-memberlist-keys Secret which
+		// antrea-controller creates with a randomly-generated key if it does not exist yet. The
+		// memberlist instance is only created (in Cluster.Run) once the key is available, so that
+		// the gossip traffic is never left unauthenticated; until then this Node does not claim any
+		// Egress or ServiceExternalIP IP, and the rest of the agent is not affected.
+		gossipConfig := memberlist.GossipConfig{
+			KeySource:      memberlistkeys.NewSecretWatcher(k8sClient, env.GetAntreaNamespace()),
+			VerifyOutgoing: *o.config.Memberlist.GossipVerifyOutgoing,
+			VerifyIncoming: *o.config.Memberlist.GossipVerifyIncoming,
+		}
 		memberlistCluster, err = memberlist.NewCluster(nodeTransportIP, o.config.ClusterMembershipPort,
-			nodeConfig.Name, nodeInformer, externalIPPoolInformer, nil,
+			nodeConfig.Name, gossipConfig, nodeInformer, externalIPPoolInformer, nil,
 		)
 		if err != nil {
 			return fmt.Errorf("error creating new memberlist cluster: %v", err)
@@ -620,19 +636,37 @@ func run(o *Options) error {
 	var localExternalNodeInformer cache.SharedIndexInformer
 
 	var secondaryNetworkController *secondarynetwork.Controller
+	var antreaNodeConfigController *antreanodeconfig.Controller
 	var cniDeleteChecker agenttypes.CNIDeleteChecker
 	cniDeleteChecker = nil
+	var ancSubscriber channel.Subscriber
+
+	if features.DefaultFeatureGate.Enabled(features.AntreaNodeConfig) {
+		antreaNodeConfigInformer := crdInformerFactory.Crd().V1alpha1().AntreaNodeConfigs()
+		antreaNodeConfigUpdateChannel = channel.NewSubscribableChannel("AntreaNodeConfig", 100)
+		antreaNodeConfigController = antreanodeconfig.NewController(
+			antreaNodeConfigInformer,
+			nodeInformer,
+			nodeConfig.Name,
+			antreaNodeConfigUpdateChannel,
+		)
+		ancSubscriber = antreaNodeConfigUpdateChannel
+	}
+
 	// Secondary network controller should be created before CNIServer.Run() to make sure no Pod CNI updates will be missed.
 	if features.DefaultFeatureGate.Enabled(features.SecondaryNetwork) {
 		secondaryNetworkController, err = secondarynetwork.NewController(
 			o.config.ClientConnection, o.config.KubeAPIServerOverride,
 			k8sClient, localPodInformer.Get(),
 			podUpdateChannel, ifaceStore, nodeConfig,
-			&o.config.SecondaryNetwork, ovsdbConnection, ipPoolInformer.Lister())
+			&o.config.SecondaryNetwork, ovsdbConnection, ipPoolInformer.Lister(),
+			ancSubscriber)
 		if err != nil {
 			return fmt.Errorf("failed to create secondary network controller: %w", err)
 		}
-		cniDeleteChecker = secondaryNetworkController
+		if secondaryNetworkController != nil {
+			cniDeleteChecker = secondaryNetworkController
+		}
 	}
 
 	if o.nodeType == config.K8sNode {
@@ -723,6 +757,28 @@ func run(o *Options) error {
 		return err
 	}
 
+	// Initialize the NPL agent before the flow exporter so the controller can be passed as
+	// portcache.NPLQuerier (NPLController implements that interface).
+	var nplQuerier portcache.NPLQuerier
+	if o.enableNodePortLocal {
+		nplController, err := npl.InitializeNPLAgent(
+			k8sClient,
+			serviceInformer,
+			localPodInformer.Get(),
+			nodeInformer,
+			o.nplStartPort,
+			o.nplEndPort,
+			nodeConfig.Name,
+			v4Enabled,
+			v6Enabled,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to start NPL agent: %v", err)
+		}
+		nplQuerier = nplController
+		go nplController.Run(stopCh)
+	}
+
 	var podStore objectstore.PodStore
 	var flowExporter *flowexporter.FlowExporter
 	if enableFlowExporter {
@@ -756,7 +812,7 @@ func run(o *Options) error {
 			flowExporterDestinationInformer,
 			egressController,
 			podNetworkWait,
-		)
+			nplQuerier)
 		if err != nil {
 			return fmt.Errorf("error when creating IPFIX flow exporter: %v", err)
 		}
@@ -768,6 +824,9 @@ func run(o *Options) error {
 	if o.nodeType == config.K8sNode {
 		go routeClient.Run(ctx)
 		go podUpdateChannel.Run(stopCh)
+		if antreaNodeConfigUpdateChannel != nil {
+			go antreaNodeConfigUpdateChannel.Run(stopCh)
+		}
 		go cniServer.Run(stopCh)
 		go nodeRouteController.Run(stopCh)
 	} else {
@@ -781,25 +840,6 @@ func run(o *Options) error {
 	}
 
 	go antreaClientProvider.Run(ctx)
-
-	// Initialize the NPL agent.
-	if o.enableNodePortLocal {
-		nplController, err := npl.InitializeNPLAgent(
-			k8sClient,
-			serviceInformer,
-			localPodInformer.Get(),
-			nodeInformer,
-			o.nplStartPort,
-			o.nplEndPort,
-			nodeConfig.Name,
-			v4Enabled,
-			v6Enabled,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to start NPL agent: %v", err)
-		}
-		go nplController.Run(stopCh)
-	}
 
 	// Antrea IPAM is needed by bridging mode and secondary network IPAM.
 	if enableAntreaIPAM {
@@ -860,6 +900,10 @@ func run(o *Options) error {
 	informerFactory.Start(stopCh)
 	crdInformerFactory.Start(stopCh)
 
+	if antreaNodeConfigController != nil {
+		go antreaNodeConfigController.Run(stopCh)
+	}
+
 	if o.enableEgress || features.DefaultFeatureGate.Enabled(features.ServiceExternalIP) {
 		go externalIPPoolController.Run(stopCh)
 		go memberlistCluster.Run(stopCh)
@@ -916,7 +960,7 @@ func run(o *Options) error {
 			nodeConfig,
 			ifaceStore,
 			multicastSocket,
-			sets.New[string](append(o.config.Multicast.MulticastInterfaces, nodeConfig.NodeTransportInterfaceName)...),
+			sets.New(append(o.config.Multicast.MulticastInterfaces, nodeConfig.NodeTransportInterfaceName)...),
 			podUpdateChannel,
 			o.igmpQueryInterval,
 			o.igmpQueryVersions,
@@ -967,13 +1011,22 @@ func run(o *Options) error {
 		}
 	}
 	// secondaryNetworkController Initialize must be run after FlowRestoreComplete for the case that Node
-	// IPs are moved to the secondary OVS bridge
-	if features.DefaultFeatureGate.Enabled(features.SecondaryNetwork) {
-		defer secondaryNetworkController.Restore()
-		if err = secondaryNetworkController.Initialize(); err != nil {
+	// IPs are moved to the secondary OVS bridge. When AntreaNodeConfig drives the secondary bridge,
+	// Initialize waits for the first ANC snapshot before setting up the bridge.
+	if features.DefaultFeatureGate.Enabled(features.SecondaryNetwork) && secondaryNetworkController != nil {
+		if err = secondaryNetworkController.Initialize(stopCh); err != nil {
 			return fmt.Errorf("failed to initialize secondary network: %v", err)
 		}
-		go secondaryNetworkController.Run(stopCh)
+		// The separate cancel function stops Controller.Run and PodController if run
+		// returns an error after starting the Controller but before the global stopCh is closed.
+		// ShutdownAndRestore then synchronously stops bridge reconciliation and only waits for
+		// a bridge operation already in progress, without waiting for PodController workers.
+		secondaryNetworkCtx, secondaryNetworkCtxCancel := context.WithCancel(ctx)
+		go secondaryNetworkController.Run(secondaryNetworkCtx.Done())
+		defer func() {
+			secondaryNetworkCtxCancel()
+			secondaryNetworkController.ShutdownAndRestore()
+		}()
 	}
 
 	// statsCollector collects stats and reports to the antrea-controller periodically. For now it's only used for

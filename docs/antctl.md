@@ -195,6 +195,10 @@ working directory, using the current timestamp as a suffix. The command also
 provides additional flags to filter the results: run `antctl supportbundle
 --help` for the full list.
 
+When run out-of-cluster, the kubeconfig used by antctl must also be authorized
+to create a token for the `antctl` ServiceAccount, which antctl uses to
+authenticate to each Agent.
+
 The collected support bundle will include the following (more information may be
 included over time):
 
@@ -669,6 +673,9 @@ on Node <TARGET_NODE>, use:
 antctl proxy --agent-node
 ```
 
+As with `antctl supportbundle`, this also requires the kubeconfig used by
+antctl to be authorized to create a token for the `antctl` ServiceAccount.
+
 You can then access the API at `127.0.0.1:8001`. To implement this
 functionality, antctl retrieves the Node IP address and API server port for the
 Antrea Controller or for the specified Agent from the K8s API, and it proxies
@@ -732,6 +739,7 @@ $ antctl get flowrecords --srcip 10.10.0.1 --srcport 50497 -o json
     "destinationNodeName": "k8s-node-worker-1",
     "destinationPodName": "coredns-78fcd69978-x2twv",
     "destinationPodNamespace": "kube-system",
+    "destinationServiceIPv4": "0.0.0.0",
     "destinationServicePort": 0,
     "destinationServicePortName": "",
     "destinationTransportPort": 53,

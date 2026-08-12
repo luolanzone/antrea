@@ -74,9 +74,10 @@ var (
 		"egressName",
 		"egressIP",
 		"egressNodeName",
+		"proxySnatPort",
 	}
-	AntreaInfoElementsIPv4 = append(antreaInfoElementsCommon, []string{"destinationClusterIPv4"}...)
-	AntreaInfoElementsIPv6 = append(antreaInfoElementsCommon, []string{"destinationClusterIPv6"}...)
+	AntreaInfoElementsIPv4 = append(antreaInfoElementsCommon, []string{"destinationClusterIPv4", "proxySnatIPv4", "destinationServiceIPv4"}...)
+	AntreaInfoElementsIPv6 = append(antreaInfoElementsCommon, []string{"destinationClusterIPv6", "proxySnatIPv6", "destinationServiceIPv6"}...)
 )
 
 type ipfixExporter struct {
@@ -343,21 +344,21 @@ func (e *ipfixExporter) addConnToSet(conn *connection.Connection) error {
 			} else {
 				ie.SetStringValue("")
 			}
-		case "destinationClusterIPv4":
+		case "destinationClusterIPv4", "destinationServiceIPv4":
 			if conn.DestinationServicePortName != "" {
 				ie.SetIPAddressValue(conn.OriginalDestinationAddress.AsSlice())
 			} else {
 				// Sending dummy IP as IPFIX collector expects constant length of data for IP field.
 				// We should probably think of better approach as this involves customization of IPFIX collector to ignore
 				// this dummy IP address.
-				ie.SetIPAddressValue(net.IP{0, 0, 0, 0})
+				ie.SetIPAddressValue(net.IPv4zero)
 			}
-		case "destinationClusterIPv6":
+		case "destinationClusterIPv6", "destinationServiceIPv6":
 			if conn.DestinationServicePortName != "" {
 				ie.SetIPAddressValue(conn.OriginalDestinationAddress.AsSlice())
 			} else {
 				// Same as destinationClusterIPv4.
-				ie.SetIPAddressValue(net.ParseIP("::"))
+				ie.SetIPAddressValue(net.IPv6zero)
 			}
 		case "destinationServicePort":
 			if conn.DestinationServicePortName != "" {
@@ -397,6 +398,20 @@ func (e *ipfixExporter) addConnToSet(conn *connection.Connection) error {
 			ie.SetStringValue(conn.EgressIP)
 		case "egressNodeName":
 			ie.SetStringValue(conn.EgressNodeName)
+		case "proxySnatIPv4":
+			if conn.ProxySnatIP.IsValid() {
+				ie.SetIPAddressValue(conn.ProxySnatIP.AsSlice())
+			} else {
+				ie.SetIPAddressValue(net.IPv4zero)
+			}
+		case "proxySnatIPv6":
+			if conn.ProxySnatIP.IsValid() {
+				ie.SetIPAddressValue(conn.ProxySnatIP.AsSlice())
+			} else {
+				ie.SetIPAddressValue(net.IPv6zero)
+			}
+		case "proxySnatPort":
+			ie.SetUnsigned16Value(conn.ProxySnatPort)
 		}
 	}
 	err := e.ipfixSet.AddRecordV2(eL, templateID)

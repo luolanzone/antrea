@@ -93,6 +93,7 @@ type networkPolicyController struct {
 	annpStore                  cache.Store
 	anpStore                   cache.Store
 	banpStore                  cache.Store
+	cnpStore                   cache.Store
 	tierStore                  cache.Store
 	cgStore                    cache.Store
 	gStore                     cache.Store
@@ -142,6 +143,7 @@ func newController(k8sObjects, crdObjects []runtime.Object) (*fake.Clientset, *n
 		crdInformerFactory.Crd().V1beta1().NetworkPolicies(),
 		policyInformerFactory.Policy().V1alpha1().AdminNetworkPolicies(),
 		policyInformerFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies(),
+		policyInformerFactory.Policy().V1alpha2().ClusterNetworkPolicies(),
 		crdInformerFactory.Crd().V1beta1().Tiers(),
 		cgInformer,
 		gInformer,
@@ -170,6 +172,7 @@ func newController(k8sObjects, crdObjects []runtime.Object) (*fake.Clientset, *n
 		crdInformerFactory.Crd().V1beta1().NetworkPolicies().Informer().GetStore(),
 		policyInformerFactory.Policy().V1alpha1().AdminNetworkPolicies().Informer().GetStore(),
 		policyInformerFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies().Informer().GetStore(),
+		policyInformerFactory.Policy().V1alpha2().ClusterNetworkPolicies().Informer().GetStore(),
 		crdInformerFactory.Crd().V1beta1().Tiers().Informer().GetStore(),
 		crdInformerFactory.Crd().V1beta1().ClusterGroups().Informer().GetStore(),
 		crdInformerFactory.Crd().V1beta1().Groups().Informer().GetStore(),
@@ -203,6 +206,7 @@ func newControllerWithoutEventHandler(k8sObjects, crdObjects []runtime.Object) (
 	annpInformer := crdInformerFactory.Crd().V1beta1().NetworkPolicies()
 	anpInformer := policyInformerFactory.Policy().V1alpha1().AdminNetworkPolicies()
 	banpInformer := policyInformerFactory.Policy().V1alpha1().BaselineAdminNetworkPolicies()
+	cnpInformer := policyInformerFactory.Policy().V1alpha2().ClusterNetworkPolicies()
 	cgInformer := crdInformerFactory.Crd().V1beta1().ClusterGroups()
 	groupInformer := crdInformerFactory.Crd().V1beta1().Groups()
 	groupEntityIndex := grouping.NewGroupEntityIndex()
@@ -219,12 +223,18 @@ func newControllerWithoutEventHandler(k8sObjects, crdObjects []runtime.Object) (
 		acnpInformer:               acnpInformer,
 		acnpLister:                 acnpInformer.Lister(),
 		acnpListerSynced:           acnpInformer.Informer().HasSynced,
+		cnpInformer:                cnpInformer,
+		cnpLister:                  cnpInformer.Lister(),
+		cnpListerSynced:            cnpInformer.Informer().HasSynced,
 		annpInformer:               annpInformer,
 		annpLister:                 annpInformer.Lister(),
 		annpListerSynced:           annpInformer.Informer().HasSynced,
 		cgInformer:                 cgInformer,
 		cgLister:                   cgInformer.Lister(),
 		cgListerSynced:             cgInformer.Informer().HasSynced,
+		grpInformer:                groupInformer,
+		grpLister:                  groupInformer.Lister(),
+		grpListerSynced:            groupInformer.Informer().HasSynced,
 		addressGroupStore:          addressGroupStore,
 		appliedToGroupStore:        appliedToGroupStore,
 		internalNetworkPolicyStore: internalNetworkPolicyStore,
@@ -268,6 +278,7 @@ func newControllerWithoutEventHandler(k8sObjects, crdObjects []runtime.Object) (
 		annpInformer.Informer().GetStore(),
 		anpInformer.Informer().GetStore(),
 		banpInformer.Informer().GetStore(),
+		cnpInformer.Informer().GetStore(),
 		tierInformer.Informer().GetStore(),
 		cgInformer.Informer().GetStore(),
 		groupInformer.Informer().GetStore(),
@@ -2316,6 +2327,47 @@ func TestProcessNetworkPolicy(t *testing.T) {
 					Priority:      defaultRulePriority,
 					Action:        &defaultAction,
 					EnableLogging: true,
+				}},
+				AppliedToGroups: []string{getNormalizedUID(antreatypes.NewGroupSelector("nsA", &metav1.LabelSelector{}, nil, nil, nil).NormalizedName)},
+			},
+			expectedAppliedToGroups: 1,
+			expectedAddressGroups:   0,
+		},
+		{
+			name: "default-allow-ingress-invalid-logging-annotation",
+			existingObjects: []runtime.Object{
+				&corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "nsA",
+						// An invalid (non-boolean) value must not enable logging.
+						Annotations: map[string]string{"networkpolicy.antrea.io/enable-logging": "yes"},
+					},
+				},
+			},
+			inputPolicy: &networkingv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "nsA", Name: "npA", UID: "uidA"},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+					Ingress:     []networkingv1.NetworkPolicyIngressRule{{}},
+				},
+			},
+			expectedPolicy: &antreatypes.NetworkPolicy{
+				UID:  "uidA",
+				Name: "uidA",
+				SourceRef: &controlplane.NetworkPolicyReference{
+					Type:      controlplane.K8sNetworkPolicy,
+					Namespace: "nsA",
+					Name:      "npA",
+					UID:       "uidA",
+				},
+				Rules: []controlplane.NetworkPolicyRule{{
+					Direction: controlplane.DirectionIn,
+					From:      matchAllPeer,
+					Services:  nil,
+					Priority:  defaultRulePriority,
+					Action:    &defaultAction,
+					// EnableLogging stays false because the annotation value is invalid.
 				}},
 				AppliedToGroups: []string{getNormalizedUID(antreatypes.NewGroupSelector("nsA", &metav1.LabelSelector{}, nil, nil, nil).NormalizedName)},
 			},

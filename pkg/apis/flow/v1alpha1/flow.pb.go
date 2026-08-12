@@ -205,6 +205,7 @@ const (
 	NetworkPolicyType_NETWORK_POLICY_TYPE_K8S         NetworkPolicyType = 1
 	NetworkPolicyType_NETWORK_POLICY_TYPE_ANP         NetworkPolicyType = 2
 	NetworkPolicyType_NETWORK_POLICY_TYPE_ACNP        NetworkPolicyType = 3
+	NetworkPolicyType_NETWORK_POLICY_TYPE_K8SCNP      NetworkPolicyType = 4
 )
 
 // Enum value maps for NetworkPolicyType.
@@ -214,12 +215,14 @@ var (
 		1: "NETWORK_POLICY_TYPE_K8S",
 		2: "NETWORK_POLICY_TYPE_ANP",
 		3: "NETWORK_POLICY_TYPE_ACNP",
+		4: "NETWORK_POLICY_TYPE_K8SCNP",
 	}
 	NetworkPolicyType_value = map[string]int32{
 		"NETWORK_POLICY_TYPE_UNSPECIFIED": 0,
 		"NETWORK_POLICY_TYPE_K8S":         1,
 		"NETWORK_POLICY_TYPE_ANP":         2,
 		"NETWORK_POLICY_TYPE_ACNP":        3,
+		"NETWORK_POLICY_TYPE_K8SCNP":      4,
 	}
 )
 
@@ -730,20 +733,21 @@ func (x *Labels) GetLabels() map[string]string {
 }
 
 type Kubernetes struct {
-	state                          protoimpl.MessageState  `protogen:"open.v1"`
-	FlowType                       FlowType                `protobuf:"varint,1,opt,name=flow_type,json=flowType,proto3,enum=antrea_io.antrea.pkg.apis.flow.v1alpha1.FlowType" json:"flow_type,omitempty"`
-	SourcePodNamespace             string                  `protobuf:"bytes,2,opt,name=source_pod_namespace,json=sourcePodNamespace,proto3" json:"source_pod_namespace,omitempty"`
-	SourcePodName                  string                  `protobuf:"bytes,3,opt,name=source_pod_name,json=sourcePodName,proto3" json:"source_pod_name,omitempty"`
-	SourcePodUid                   string                  `protobuf:"bytes,4,opt,name=source_pod_uid,json=sourcePodUid,proto3" json:"source_pod_uid,omitempty"`
-	SourcePodLabels                *Labels                 `protobuf:"bytes,5,opt,name=source_pod_labels,json=sourcePodLabels,proto3" json:"source_pod_labels,omitempty"`
-	SourceNodeName                 string                  `protobuf:"bytes,6,opt,name=source_node_name,json=sourceNodeName,proto3" json:"source_node_name,omitempty"`
-	SourceNodeUid                  string                  `protobuf:"bytes,7,opt,name=source_node_uid,json=sourceNodeUid,proto3" json:"source_node_uid,omitempty"`
-	DestinationPodNamespace        string                  `protobuf:"bytes,8,opt,name=destination_pod_namespace,json=destinationPodNamespace,proto3" json:"destination_pod_namespace,omitempty"`
-	DestinationPodName             string                  `protobuf:"bytes,9,opt,name=destination_pod_name,json=destinationPodName,proto3" json:"destination_pod_name,omitempty"`
-	DestinationPodUid              string                  `protobuf:"bytes,10,opt,name=destination_pod_uid,json=destinationPodUid,proto3" json:"destination_pod_uid,omitempty"`
-	DestinationPodLabels           *Labels                 `protobuf:"bytes,11,opt,name=destination_pod_labels,json=destinationPodLabels,proto3" json:"destination_pod_labels,omitempty"`
-	DestinationNodeName            string                  `protobuf:"bytes,12,opt,name=destination_node_name,json=destinationNodeName,proto3" json:"destination_node_name,omitempty"`
-	DestinationNodeUid             string                  `protobuf:"bytes,13,opt,name=destination_node_uid,json=destinationNodeUid,proto3" json:"destination_node_uid,omitempty"`
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	FlowType                FlowType               `protobuf:"varint,1,opt,name=flow_type,json=flowType,proto3,enum=antrea_io.antrea.pkg.apis.flow.v1alpha1.FlowType" json:"flow_type,omitempty"`
+	SourcePodNamespace      string                 `protobuf:"bytes,2,opt,name=source_pod_namespace,json=sourcePodNamespace,proto3" json:"source_pod_namespace,omitempty"`
+	SourcePodName           string                 `protobuf:"bytes,3,opt,name=source_pod_name,json=sourcePodName,proto3" json:"source_pod_name,omitempty"`
+	SourcePodUid            string                 `protobuf:"bytes,4,opt,name=source_pod_uid,json=sourcePodUid,proto3" json:"source_pod_uid,omitempty"`
+	SourcePodLabels         *Labels                `protobuf:"bytes,5,opt,name=source_pod_labels,json=sourcePodLabels,proto3" json:"source_pod_labels,omitempty"`
+	SourceNodeName          string                 `protobuf:"bytes,6,opt,name=source_node_name,json=sourceNodeName,proto3" json:"source_node_name,omitempty"`
+	SourceNodeUid           string                 `protobuf:"bytes,7,opt,name=source_node_uid,json=sourceNodeUid,proto3" json:"source_node_uid,omitempty"`
+	DestinationPodNamespace string                 `protobuf:"bytes,8,opt,name=destination_pod_namespace,json=destinationPodNamespace,proto3" json:"destination_pod_namespace,omitempty"`
+	DestinationPodName      string                 `protobuf:"bytes,9,opt,name=destination_pod_name,json=destinationPodName,proto3" json:"destination_pod_name,omitempty"`
+	DestinationPodUid       string                 `protobuf:"bytes,10,opt,name=destination_pod_uid,json=destinationPodUid,proto3" json:"destination_pod_uid,omitempty"`
+	DestinationPodLabels    *Labels                `protobuf:"bytes,11,opt,name=destination_pod_labels,json=destinationPodLabels,proto3" json:"destination_pod_labels,omitempty"`
+	DestinationNodeName     string                 `protobuf:"bytes,12,opt,name=destination_node_name,json=destinationNodeName,proto3" json:"destination_node_name,omitempty"`
+	DestinationNodeUid      string                 `protobuf:"bytes,13,opt,name=destination_node_uid,json=destinationNodeUid,proto3" json:"destination_node_uid,omitempty"`
+	// Deprecated: Marked as deprecated in pkg/apis/flow/v1alpha1/flow.proto.
 	DestinationClusterIp           []byte                  `protobuf:"bytes,14,opt,name=destination_cluster_ip,json=destinationClusterIp,proto3" json:"destination_cluster_ip,omitempty"`
 	DestinationServicePort         uint32                  `protobuf:"varint,15,opt,name=destination_service_port,json=destinationServicePort,proto3" json:"destination_service_port,omitempty"`
 	DestinationServicePortName     string                  `protobuf:"bytes,16,opt,name=destination_service_port_name,json=destinationServicePortName,proto3" json:"destination_service_port_name,omitempty"`
@@ -765,6 +769,7 @@ type Kubernetes struct {
 	EgressNodeName                 string                  `protobuf:"bytes,32,opt,name=egress_node_name,json=egressNodeName,proto3" json:"egress_node_name,omitempty"`
 	EgressNodeUid                  string                  `protobuf:"bytes,33,opt,name=egress_node_uid,json=egressNodeUid,proto3" json:"egress_node_uid,omitempty"`
 	EgressUid                      string                  `protobuf:"bytes,34,opt,name=egress_uid,json=egressUid,proto3" json:"egress_uid,omitempty"`
+	DestinationServiceIp           []byte                  `protobuf:"bytes,35,opt,name=destination_service_ip,json=destinationServiceIp,proto3" json:"destination_service_ip,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -890,6 +895,7 @@ func (x *Kubernetes) GetDestinationNodeUid() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in pkg/apis/flow/v1alpha1/flow.proto.
 func (x *Kubernetes) GetDestinationClusterIp() []byte {
 	if x != nil {
 		return x.DestinationClusterIp
@@ -1035,6 +1041,13 @@ func (x *Kubernetes) GetEgressUid() string {
 		return x.EgressUid
 	}
 	return ""
+}
+
+func (x *Kubernetes) GetDestinationServiceIp() []byte {
+	if x != nil {
+		return x.DestinationServiceIp
+	}
+	return nil
 }
 
 type App struct {
@@ -1240,6 +1253,8 @@ type Flow struct {
 	App           *App          `protobuf:"bytes,11,opt,name=app,proto3" json:"app,omitempty"`
 	FlowDirection FlowDirection `protobuf:"varint,12,opt,name=flow_direction,json=flowDirection,proto3,enum=antrea_io.antrea.pkg.apis.flow.v1alpha1.FlowDirection" json:"flow_direction,omitempty"`
 	Aggregation   *Aggregation  `protobuf:"bytes,13,opt,name=aggregation,proto3" json:"aggregation,omitempty"`
+	ProxySnatIp   []byte        `protobuf:"bytes,14,opt,name=proxy_snat_ip,json=proxySnatIp,proto3" json:"proxy_snat_ip,omitempty"`
+	ProxySnatPort uint32        `protobuf:"varint,15,opt,name=proxy_snat_port,json=proxySnatPort,proto3" json:"proxy_snat_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1366,6 +1381,20 @@ func (x *Flow) GetAggregation() *Aggregation {
 	return nil
 }
 
+func (x *Flow) GetProxySnatIp() []byte {
+	if x != nil {
+		return x.ProxySnatIp
+	}
+	return nil
+}
+
+func (x *Flow) GetProxySnatPort() uint32 {
+	if x != nil {
+		return x.ProxySnatPort
+	}
+	return 0
+}
+
 var File_pkg_apis_flow_v1alpha1_flow_proto protoreflect.FileDescriptor
 
 const file_pkg_apis_flow_v1alpha1_flow_proto_rawDesc = "" +
@@ -1402,7 +1431,7 @@ const file_pkg_apis_flow_v1alpha1_flow_proto_rawDesc = "" +
 	"\x06labels\x18\x01 \x03(\v2;.antrea_io.antrea.pkg.apis.flow.v1alpha1.Labels.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb2\x11\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xec\x11\n" +
 	"\n" +
 	"Kubernetes\x12N\n" +
 	"\tflow_type\x18\x01 \x01(\x0e21.antrea_io.antrea.pkg.apis.flow.v1alpha1.FlowTypeR\bflowType\x120\n" +
@@ -1418,8 +1447,8 @@ const file_pkg_apis_flow_v1alpha1_flow_proto_rawDesc = "" +
 	" \x01(\tR\x11destinationPodUid\x12e\n" +
 	"\x16destination_pod_labels\x18\v \x01(\v2/.antrea_io.antrea.pkg.apis.flow.v1alpha1.LabelsR\x14destinationPodLabels\x122\n" +
 	"\x15destination_node_name\x18\f \x01(\tR\x13destinationNodeName\x120\n" +
-	"\x14destination_node_uid\x18\r \x01(\tR\x12destinationNodeUid\x124\n" +
-	"\x16destination_cluster_ip\x18\x0e \x01(\fR\x14destinationClusterIp\x128\n" +
+	"\x14destination_node_uid\x18\r \x01(\tR\x12destinationNodeUid\x128\n" +
+	"\x16destination_cluster_ip\x18\x0e \x01(\fB\x02\x18\x01R\x14destinationClusterIp\x128\n" +
 	"\x18destination_service_port\x18\x0f \x01(\rR\x16destinationServicePort\x12A\n" +
 	"\x1ddestination_service_port_name\x18\x10 \x01(\tR\x1adestinationServicePortName\x126\n" +
 	"\x17destination_service_uid\x18\x11 \x01(\tR\x15destinationServiceUid\x12y\n" +
@@ -1441,7 +1470,8 @@ const file_pkg_apis_flow_v1alpha1_flow_proto_rawDesc = "" +
 	"\x10egress_node_name\x18  \x01(\tR\x0eegressNodeName\x12&\n" +
 	"\x0fegress_node_uid\x18! \x01(\tR\regressNodeUid\x12\x1d\n" +
 	"\n" +
-	"egress_uid\x18\" \x01(\tR\tegressUid\"G\n" +
+	"egress_uid\x18\" \x01(\tR\tegressUid\x124\n" +
+	"\x16destination_service_ip\x18# \x01(\fR\x14destinationServiceIp\"G\n" +
 	"\x03App\x12#\n" +
 	"\rprotocol_name\x18\x01 \x01(\tR\fprotocolName\x12\x1b\n" +
 	"\thttp_vals\x18\x02 \x01(\fR\bhttpVals\"\xa4\a\n" +
@@ -1460,7 +1490,7 @@ const file_pkg_apis_flow_v1alpha1_flow_proto_rawDesc = "" +
 	"\n" +
 	"throughput\x18\v \x01(\x04R\n" +
 	"throughput\x12-\n" +
-	"\x12reverse_throughput\x18\f \x01(\x04R\x11reverseThroughput\"\x89\a\n" +
+	"\x12reverse_throughput\x18\f \x01(\x04R\x11reverseThroughput\"\xd5\a\n" +
 	"\x04Flow\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12D\n" +
 	"\x05ipfix\x18\x02 \x01(\v2..antrea_io.antrea.pkg.apis.flow.v1alpha1.IPFIXR\x05ipfix\x125\n" +
@@ -1476,7 +1506,9 @@ const file_pkg_apis_flow_v1alpha1_flow_proto_rawDesc = "" +
 	" \x01(\v2..antrea_io.antrea.pkg.apis.flow.v1alpha1.StatsR\freverseStats\x12B\n" +
 	"\x03app\x18\v \x01(\v2,.antrea_io.antrea.pkg.apis.flow.v1alpha1.AppB\x02\x18\x01R\x03app\x12]\n" +
 	"\x0eflow_direction\x18\f \x01(\x0e26.antrea_io.antrea.pkg.apis.flow.v1alpha1.FlowDirectionR\rflowDirection\x12V\n" +
-	"\vaggregation\x18\r \x01(\v24.antrea_io.antrea.pkg.apis.flow.v1alpha1.AggregationR\vaggregation*\xde\x01\n" +
+	"\vaggregation\x18\r \x01(\v24.antrea_io.antrea.pkg.apis.flow.v1alpha1.AggregationR\vaggregation\x12\"\n" +
+	"\rproxy_snat_ip\x18\x0e \x01(\fR\vproxySnatIp\x12&\n" +
+	"\x0fproxy_snat_port\x18\x0f \x01(\rR\rproxySnatPort*\xde\x01\n" +
 	"\rFlowEndReason\x12\x1f\n" +
 	"\x1bFLOW_END_REASON_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cFLOW_END_REASON_IDLE_TIMEOUT\x10\x01\x12\"\n" +
@@ -1493,12 +1525,13 @@ const file_pkg_apis_flow_v1alpha1_flow_proto_rawDesc = "" +
 	"\x14FLOW_TYPE_INTRA_NODE\x10\x01\x12\x18\n" +
 	"\x14FLOW_TYPE_INTER_NODE\x10\x02\x12\x19\n" +
 	"\x15FLOW_TYPE_TO_EXTERNAL\x10\x03\x12\x1b\n" +
-	"\x17FLOW_TYPE_FROM_EXTERNAL\x10\x04*\x90\x01\n" +
+	"\x17FLOW_TYPE_FROM_EXTERNAL\x10\x04*\xb0\x01\n" +
 	"\x11NetworkPolicyType\x12#\n" +
 	"\x1fNETWORK_POLICY_TYPE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17NETWORK_POLICY_TYPE_K8S\x10\x01\x12\x1b\n" +
 	"\x17NETWORK_POLICY_TYPE_ANP\x10\x02\x12\x1c\n" +
-	"\x18NETWORK_POLICY_TYPE_ACNP\x10\x03*\xb5\x01\n" +
+	"\x18NETWORK_POLICY_TYPE_ACNP\x10\x03\x12\x1e\n" +
+	"\x1aNETWORK_POLICY_TYPE_K8SCNP\x10\x04*\xb5\x01\n" +
 	"\x17NetworkPolicyRuleAction\x12(\n" +
 	"$NETWORK_POLICY_RULE_ACTION_NO_ACTION\x10\x00\x12$\n" +
 	" NETWORK_POLICY_RULE_ACTION_ALLOW\x10\x01\x12#\n" +

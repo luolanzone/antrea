@@ -157,9 +157,18 @@ const (
 	LoadBalancerModeDSR featuregate.Feature = "LoadBalancerModeDSR"
 
 	// alpha: v1.13
-	// Enable the AdminNetworkPolicy APIs
+	// deprecated: v2.7
+	// The upstream v1alpha1 AdminNetworkPolicy and BaselineAdminNetworkPolicy APIs are deprecated.
+	// This feature gate will be removed in two releases from v2.7.
+	// Users should migrate to the v1alpha2 ClusterNetworkPolicy API.
 	// https://github.com/kubernetes-sigs/network-policy-api
 	AdminNetworkPolicy featuregate.Feature = "AdminNetworkPolicy"
+
+	// alpha: v2.7
+	// Enable the v1alpha2 ClusterNetworkPolicy API from the network-policy-api project.
+	// This is the successor to the deprecated v1alpha1 AdminNetworkPolicy and BaselineAdminNetworkPolicy APIs.
+	// https://github.com/kubernetes-sigs/network-policy-api
+	ClusterNetworkPolicy featuregate.Feature = "ClusterNetworkPolicy"
 
 	// alpha: v1.14
 	// Enable Egress traffic shaping.
@@ -188,6 +197,11 @@ const (
 	// features that rely on netfilter. Currently, nftables is supported by the following features:
 	// - AntreaProxy (proxyAll)
 	NFTablesHostNetworkMode featuregate.Feature = "NFTablesHostNetworkMode"
+
+	// beta: v2.7
+	// Enable support for AntreaNodeConfig CRD, which allows per-Node configuration
+	// of Antrea agent settings via nodeSelector-based policies.
+	AntreaNodeConfig featuregate.Feature = "AntreaNodeConfig"
 )
 
 var (
@@ -229,17 +243,20 @@ var (
 		SupportBundleCollection:       {Default: false, PreRelease: featuregate.Alpha},
 		L7NetworkPolicy:               {Default: false, PreRelease: featuregate.Alpha},
 		LoadBalancerModeDSR:           {Default: false, PreRelease: featuregate.Alpha},
-		AdminNetworkPolicy:            {Default: false, PreRelease: featuregate.Alpha},
+		AdminNetworkPolicy:            {Default: false, PreRelease: featuregate.Deprecated},
+		ClusterNetworkPolicy:          {Default: false, PreRelease: featuregate.Alpha},
 		EgressTrafficShaping:          {Default: false, PreRelease: featuregate.Alpha},
 		EgressSeparateSubnet:          {Default: true, PreRelease: featuregate.Beta},
 		NodeNetworkPolicy:             {Default: false, PreRelease: featuregate.Alpha},
 		NodeLatencyMonitor:            {Default: false, PreRelease: featuregate.Alpha},
+		AntreaNodeConfig:              {Default: true, PreRelease: featuregate.Beta},
 	}
 
 	// AgentGates consists of all known feature gates for the Antrea Agent.
 	// When adding a new feature gate that applies to the Antrea Agent, please also add it here.
-	AgentGates = sets.New[featuregate.Feature](
+	AgentGates = sets.New(
 		AntreaIPAM,
+		AntreaNodeConfig,
 		AntreaPolicy,
 		AntreaProxy,
 		BGPPolicy,
@@ -273,10 +290,11 @@ var (
 
 	// ControllerGates consists of all known feature gates for the Antrea Controller.
 	// When adding a new feature gate that applies to the Antrea Controller, please also add it here.
-	ControllerGates = sets.New[featuregate.Feature](
+	ControllerGates = sets.New(
 		AdminNetworkPolicy,
 		AntreaIPAM,
 		AntreaPolicy,
+		ClusterNetworkPolicy,
 		Egress,
 		IPsecCertAuth,
 		L7NetworkPolicy,
@@ -306,6 +324,7 @@ var (
 		// in the future if it's fully tested on Windows.
 		BGPPolicy:         {},
 		Multicast:         {},
+		AntreaNodeConfig:  {},
 		SecondaryNetwork:  {},
 		ServiceExternalIP: {},
 		IPsecCertAuth:     {},

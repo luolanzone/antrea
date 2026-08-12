@@ -20,7 +20,7 @@ jobs:
     name: Check whether tests need to be run based on diff
     runs-on: [ubuntu-latest]
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
         show-progress: false
@@ -41,11 +41,11 @@ jobs:
     runs-on: [ubuntu-latest]
     steps:
     - name: Check-out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         show-progress: false
     - name: Set up Go using version from .go-version
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: '.go-version'
     - name: Run unit tests
@@ -63,15 +63,15 @@ jobs:
   test-unit-windows:
     needs: check-changes
     if: ${{ needs.check-changes.outputs.has_changes == 'yes' }}
-    name: Unit test (windows-2022)
-    runs-on: [windows-2022]
+    name: Unit test (windows-2025)
+    runs-on: [windows-2025]
     steps:
       - name: Check-out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Set up Go using version from .go-version
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: '.go-version'
       - name: Run unit tests
@@ -94,11 +94,11 @@ jobs:
     runs-on: [ubuntu-latest]
     steps:
       - name: Check-out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Set up Go using version from .go-version
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: '.go-version'
       - name: Run integration tests
@@ -129,11 +129,11 @@ jobs:
     runs-on: [ubuntu-latest]
     steps:
     - name: Check-out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         show-progress: false
     - name: Set up Go using version from .go-version
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: '.go-version'
     - name: Run golangci-lint
@@ -146,11 +146,11 @@ jobs:
     runs-on: [macos-latest]
     steps:
       - name: Check-out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Set up Go using version from .go-version
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: '.go-version'
       - name: Run golangci-lint
@@ -162,12 +162,24 @@ jobs:
     name: Build Antrea and antctl binaries
     runs-on: [ubuntu-latest]
     steps:
+    - name: Free disk space
+      # This job builds Antrea and antctl for 9 different GOARCH/GOOS targets in a row, which
+      # can exhaust the runner's disk with an empty Go build cache.
+      # https://github.com/actions/virtual-environments/issues/709
+      run: |
+        sudo apt-get clean
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        sudo rm -rf "/usr/local/lib/android"
+        df -h
     - name: Check-out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         show-progress: false
     - name: Set up Go using version from .go-version
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: '.go-version'
     - name: Build Antrea binaries for amd64
@@ -200,11 +212,11 @@ jobs:
     runs-on: [ubuntu-latest]
     steps:
     - name: Check-out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         show-progress: false
     - name: Set up Go using version from .go-version
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: '.go-version'
     - name: Build Antrea windows binaries
@@ -217,11 +229,11 @@ jobs:
     runs-on: [ubuntu-latest]
     steps:
     - name: Check-out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         show-progress: false
     - name: Set up Go using version from .go-version
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: '.go-version'
     # tidy check need to be run before code generation which will regenerate codes.
@@ -239,11 +251,11 @@ jobs:
     runs-on: [ubuntu-latest]
     steps:
     - name: Check-out code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         show-progress: false
     - name: Set up Go using version from .go-version
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version-file: '.go-version'
     - name: Run verify scripts
@@ -277,11 +289,11 @@ jobs:
     runs-on: [ubuntu-latest]
     steps:
       - name: Check-out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           show-progress: false
       - name: Set up Go using version from .go-version
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: '.go-version'
       - name: Run Go benchmark test

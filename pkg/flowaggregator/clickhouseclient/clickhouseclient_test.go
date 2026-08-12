@@ -17,7 +17,6 @@ package clickhouseclient
 import (
 	"database/sql/driver"
 	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
@@ -33,6 +32,10 @@ import (
 )
 
 var fakeClusterUUID = uuid.Must(uuid.NewV4()).String()
+
+// clickhouseFieldCount is the number of columns in the "flows" table INSERT query in
+// clickhouseclient.go. Refer to `insertQuery` in clickhouseclient.go.
+const clickhouseFieldCount = 51
 
 func TestCacheRecord(t *testing.T) {
 	chExportProc := &ClickHouseExportProcess{
@@ -141,8 +144,7 @@ func TestBatchCommitAllMultiRecord(t *testing.T) {
 		queueSize: maxQueueSize,
 	}
 	recordRow := flowrecord.FlowRecord{}
-	fieldCount := reflect.TypeOf(recordRow).NumField() + 1
-	argList := make([]driver.Value, fieldCount)
+	argList := make([]driver.Value, clickhouseFieldCount)
 	for i := 0; i < len(argList); i++ {
 		argList[i] = sqlmock.AnyArg()
 	}
@@ -173,8 +175,7 @@ func TestBatchCommitAllError(t *testing.T) {
 	}
 	recordRow := flowrecord.FlowRecord{}
 	chExportProc.deque.PushBack(&recordRow)
-	fieldCount := reflect.TypeOf(recordRow).NumField() + 1
-	argList := make([]driver.Value, fieldCount)
+	argList := make([]driver.Value, clickhouseFieldCount)
 	for i := 0; i < len(argList); i++ {
 		argList[i] = sqlmock.AnyArg()
 	}
@@ -186,6 +187,27 @@ func TestBatchCommitAllError(t *testing.T) {
 
 	count, err := chExportProc.batchCommitAll(t.Context())
 	assert.Error(t, err, "expected error when SQL transaction error")
+	assert.Equal(t, 0, count)
+	assert.Equal(t, 1, chExportProc.deque.Len())
+	assert.NoError(t, mock.ExpectationsWereMet(), "unfulfilled expectations for db sql operation")
+}
+
+func TestBatchCommitAllBeginError(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	require.NoError(t, err, "error when opening a stub database connection")
+	defer db.Close()
+
+	chExportProc := &ClickHouseExportProcess{
+		db:        db,
+		queueSize: maxQueueSize,
+	}
+	recordRow := flowrecord.FlowRecord{}
+	chExportProc.deque.PushBack(&recordRow)
+
+	mock.ExpectBegin().WillReturnError(fmt.Errorf("mock error for begin transaction"))
+
+	count, err := chExportProc.batchCommitAll(t.Context())
+	assert.Error(t, err, "expected error when SQL transaction cannot begin")
 	assert.Equal(t, 0, count)
 	assert.Equal(t, 1, chExportProc.deque.Len())
 	assert.NoError(t, mock.ExpectationsWereMet(), "unfulfilled expectations for db sql operation")

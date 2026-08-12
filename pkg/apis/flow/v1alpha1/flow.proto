@@ -83,6 +83,7 @@ enum NetworkPolicyType {
   NETWORK_POLICY_TYPE_K8S = 1;
   NETWORK_POLICY_TYPE_ANP = 2;
   NETWORK_POLICY_TYPE_ACNP = 3;
+  NETWORK_POLICY_TYPE_K8SCNP = 4;
 }
 
 enum NetworkPolicyRuleAction {
@@ -117,7 +118,7 @@ message Kubernetes {
   string destination_node_name = 12;
   string destination_node_uid = 13;
 
-  bytes destination_cluster_ip = 14;
+  bytes destination_cluster_ip = 14 [deprecated = true];
   uint32 destination_service_port = 15;
   string destination_service_port_name = 16;
   string destination_service_uid = 17;
@@ -141,6 +142,8 @@ message Kubernetes {
   string egress_node_name = 32;
   string egress_node_uid = 33;
   string egress_uid = 34;
+
+  bytes destination_service_ip = 35;
 }
 
 message App {
@@ -198,4 +201,7 @@ message Flow {
   FlowDirection flow_direction = 12;
 
   Aggregation aggregation = 13;
+
+  bytes proxy_snat_ip = 14;
+  uint32 proxy_snat_port = 15;
 }

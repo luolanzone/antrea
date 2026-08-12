@@ -469,6 +469,12 @@ func (o *Options) setK8sNodeDefaultOptions() {
 	if o.config.ClusterMembershipPort == 0 {
 		o.config.ClusterMembershipPort = apis.AntreaAgentClusterMembershipPort
 	}
+	if o.config.Memberlist.GossipVerifyOutgoing == nil {
+		o.config.Memberlist.GossipVerifyOutgoing = ptr.To(true)
+	}
+	if o.config.Memberlist.GossipVerifyIncoming == nil {
+		o.config.Memberlist.GossipVerifyIncoming = ptr.To(true)
+	}
 	if o.config.EnablePrometheusMetrics == nil {
 		o.config.EnablePrometheusMetrics = ptr.To(true)
 	}
@@ -824,6 +830,9 @@ func (o *Options) validateSecondaryNetworkConfig() error {
 	brConfig := o.config.SecondaryNetwork.OVSBridges[0]
 	if brConfig.BridgeName == "" {
 		return fmt.Errorf("bridge name is not provided for the secondary network OVS bridge")
+	}
+	if brConfig.BridgeName == o.config.OVSBridge {
+		return fmt.Errorf("secondary OVS bridge %q conflicts with primary OVS bridge", brConfig.BridgeName)
 	}
 	if len(brConfig.PhysicalInterfaces) > 8 {
 		return fmt.Errorf("at most eight physical interfaces can be specified for the secondary network OVS bridge")

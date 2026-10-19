@@ -37,25 +37,38 @@ func GetIPRangeSet(ipRanges []crdv1beta1.IPRange) sets.Set[string] {
 	return set
 }
 
-// parseIPRangeCIDR parses a CIDR string into a netip.Prefix
+// parseIPRangeCIDR parses a CIDR string into a netip.Prefix.
 func parseIPRangeCIDR(cidrStr string) (netip.Prefix, error) {
 	cidr, err := netip.ParsePrefix(cidrStr)
 	if err != nil {
 		return cidr, fmt.Errorf("invalid cidr %s", cidrStr)
 	}
+	// Check before masking, which can remove the mapping prefix for prefix lengths below 96.
+	// The allocators treat mapped addresses as IPv4, while netip comparisons treat them as IPv6.
+	if cidr.Addr().Is4In6() {
+		return cidr, fmt.Errorf("unsupported IPv4-mapped IPv6 CIDR %s; use an IPv4 CIDR instead", cidrStr)
+	}
 	return cidr.Masked(), nil
 }
 
-// parseIPRangeStartEnd parses start and end IP addresses
+// parseIPRangeStartEnd parses start and end IP addresses.
 func parseIPRangeStartEnd(startStr, endStr string) (netip.Addr, netip.Addr, error) {
 	start, err := netip.ParseAddr(startStr)
 	if err != nil {
 		return start, netip.Addr{}, fmt.Errorf("invalid start ip address %s", startStr)
 	}
+	if start.Is4In6() {
+		return start, netip.Addr{}, fmt.Errorf(
+			"unsupported IPv4-mapped IPv6 start ip address %s; use an IPv4 address instead", startStr)
+	}
 
 	end, err := netip.ParseAddr(endStr)
 	if err != nil {
 		return start, end, fmt.Errorf("invalid end ip address %s", endStr)
+	}
+	if end.Is4In6() {
+		return start, end, fmt.Errorf(
+			"unsupported IPv4-mapped IPv6 end ip address %s; use an IPv4 address instead", endStr)
 	}
 	return start, end, nil
 }

@@ -648,3 +648,44 @@ func TestDeleteExternalIPPool_Tombstone(t *testing.T) {
 	})
 	assert.False(t, c.IPPoolExists(pool.Name))
 }
+
+func TestCreateOrUpdateIPAllocatorMappedRanges(t *testing.T) {
+	tests := []struct {
+		name    string
+		ipRange antreacrds.IPRange
+	}{
+		{
+			name:    "mapped CIDR",
+			ipRange: antreacrds.IPRange{CIDR: "::ffff:192.0.2.0/120"},
+		},
+		{
+			name:    "mapped start and end",
+			ipRange: antreacrds.IPRange{Start: "::ffff:192.0.2.1", End: "::ffff:192.0.2.10"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			controller := newController(nil)
+			pool := newExternalIPPool("mapped", "", "", "")
+			pool.Spec.IPRanges = []antreacrds.IPRange{tt.ipRange}
+			// Existing resources are processed without admission validation on restart.
+			require.NotPanics(t, func() { controller.createOrUpdateIPAllocator(pool) })
+			allocator, exists := controller.getIPAllocator(pool.Name)
+			require.True(t, exists)
+			require.Empty(t, allocator)
+
+			pool.Spec.IPRanges = append(pool.Spec.IPRanges, antreacrds.IPRange{CIDR: "192.0.2.0/24"})
+			require.True(t, controller.createOrUpdateIPAllocator(pool))
+			allocator, exists = controller.getIPAllocator(pool.Name)
+			require.True(t, exists)
+			require.Len(t, allocator, 1)
+			assert.Equal(t, 254, allocator.Total())
+			ip, err := allocator.AllocateNext()
+			require.NoError(t, err)
+			assert.Equal(t, "192.0.2.1", ip.String())
+			require.NoError(t, allocator.AllocateIP(net.ParseIP("192.0.2.254")))
+			assert.Error(t, allocator.AllocateIP(net.ParseIP("192.0.2.255")))
+			assert.False(t, controller.createOrUpdateIPAllocator(pool))
+		})
+	}
+}

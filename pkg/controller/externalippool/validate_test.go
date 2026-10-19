@@ -367,3 +367,32 @@ func TestValidateIPRangesAndSubnetInfo(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateExternalIPPoolMappedCIDR(t *testing.T) {
+	for _, operation := range []admv1.Operation{admv1.Create, admv1.Update} {
+		for _, withIPv4 := range []bool{false, true} {
+			name := string(operation) + "/mapped-only"
+			if withIPv4 {
+				name = string(operation) + "/overlapping-IPv4"
+			}
+			t.Run(name, func(t *testing.T) {
+				controller := newController(nil)
+				pool := newExternalIPPool("mapped", "::ffff:192.0.2.0/120", "", "")
+				if withIPv4 {
+					pool.Spec.IPRanges = append(pool.Spec.IPRanges, crdv1b1.IPRange{CIDR: "192.0.2.0/24"})
+				}
+				request := &admv1.AdmissionRequest{
+					Operation: operation,
+					Object:    runtime.RawExtension{Raw: marshal(pool)},
+				}
+				if operation == admv1.Update {
+					request.OldObject.Raw = marshal(newExternalIPPool("mapped", "192.0.2.0/24", "", ""))
+				}
+				response := controller.ValidateExternalIPPool(&admv1.AdmissionReview{Request: request})
+				assert.False(t, response.Allowed)
+				require.NotNil(t, response.Result)
+				assert.Contains(t, response.Result.Message, "IPv4-mapped IPv6")
+			})
+		}
+	}
+}

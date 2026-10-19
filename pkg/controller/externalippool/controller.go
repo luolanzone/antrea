@@ -40,6 +40,7 @@ import (
 	antreainformers "antrea.io/antrea/v2/pkg/client/informers/externalversions/crd/v1beta1"
 	antrealisters "antrea.io/antrea/v2/pkg/client/listers/crd/v1beta1"
 	"antrea.io/antrea/v2/pkg/controller/metrics"
+	"antrea.io/antrea/v2/pkg/controller/validation"
 	"antrea.io/antrea/v2/pkg/ipam/ipallocator"
 	iputil "antrea.io/antrea/v2/pkg/util/ip"
 )
@@ -216,6 +217,11 @@ func (c *ExternalIPPoolController) createOrUpdateIPAllocator(ipPool *antreacrds.
 	for idx := range ipPool.Spec.IPRanges {
 		ipRange := &ipPool.Spec.IPRanges[idx]
 		ipAllocator, err := func() (*ipallocator.SingleIPAllocator, error) {
+			// Existing resources may not have passed current admission validation. In particular,
+			// mapped CIDRs must be rejected before computing an IPv4 broadcast address.
+			if _, err := validation.NormalizeRanges([]antreacrds.IPRange{*ipRange}, ""); err != nil {
+				return nil, err
+			}
 			if ipRange.CIDR != "" {
 				_, ipNet, err := net.ParseCIDR(ipRange.CIDR)
 				if err != nil {

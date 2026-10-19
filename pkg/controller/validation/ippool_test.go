@@ -632,3 +632,60 @@ func TestOverlaps(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectMappedIPRanges(t *testing.T) {
+	tests := []struct {
+		name    string
+		ipRange crdv1beta1.IPRange
+	}{
+		{
+			name:    "mapped CIDR",
+			ipRange: crdv1beta1.IPRange{CIDR: "::ffff:192.0.2.0/120"},
+		},
+		{
+			name:    "hexadecimal mapped CIDR",
+			ipRange: crdv1beta1.IPRange{CIDR: "::ffff:c000:200/120"},
+		},
+		{
+			name:    "mapped CIDR with host bits",
+			ipRange: crdv1beta1.IPRange{CIDR: "::ffff:192.0.2.1/120"},
+		},
+		{
+			name:    "mapped CIDR shorter than mapping prefix",
+			ipRange: crdv1beta1.IPRange{CIDR: "::ffff:192.0.2.0/95"},
+		},
+		{
+			name:    "mapped CIDR covering all IPv4 addresses",
+			ipRange: crdv1beta1.IPRange{CIDR: "::ffff:0.0.0.0/96"},
+		},
+		{
+			name:    "mapped single address CIDR",
+			ipRange: crdv1beta1.IPRange{CIDR: "::ffff:192.0.2.1/128"},
+		},
+		{
+			name:    "mapped start and end",
+			ipRange: crdv1beta1.IPRange{Start: "::ffff:192.0.2.1", End: "::ffff:192.0.2.10"},
+		},
+		{
+			name:    "mapped start",
+			ipRange: crdv1beta1.IPRange{Start: "::ffff:192.0.2.1", End: "192.0.2.10"},
+		},
+		{
+			name:    "mapped end",
+			ipRange: crdv1beta1.IPRange{Start: "192.0.2.1", End: "::ffff:192.0.2.10"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NormalizeRanges([]crdv1beta1.IPRange{tt.ipRange}, "")
+			require.ErrorContains(t, err, "IPv4-mapped IPv6")
+			_, err = ValidateIPRangesAndSubnetInfo(nil, []crdv1beta1.IPRange{tt.ipRange})
+			require.ErrorContains(t, err, "IPv4-mapped IPv6")
+			// An equivalent IPv4 range must not let the mapped range bypass validation.
+			_, err = ValidateIPRangesAndSubnetInfo(nil, []crdv1beta1.IPRange{
+				{CIDR: "192.0.2.0/24"}, tt.ipRange,
+			})
+			require.ErrorContains(t, err, "IPv4-mapped IPv6")
+		})
+	}
+}

@@ -312,7 +312,7 @@ func TestController_RotateCertificates(t *testing.T) {
 		defer watcher.Stop()
 		require.NoError(t, err)
 		// start a fake signer in background to sign CSRs.
-		signCh := make(chan struct{})
+		signCh := make(chan *x509.Certificate)
 		go func() {
 			defer close(signCh)
 			counter := 0
@@ -322,8 +322,8 @@ func TestController_RotateCertificates(t *testing.T) {
 					csr, ok := ev.Object.(*certificatesv1.CertificateSigningRequest)
 					assert.True(t, ok)
 					// issue a certificate with lifetime of 10 seconds.
-					signCSR(t, fakeController, csr, time.Second*10)
-					signCh <- struct{}{}
+					cert := signCSR(t, fakeController, csr, time.Second*10)
+					signCh <- cert
 					counter++
 					if counter == 2 {
 						return
@@ -343,17 +343,16 @@ func TestController_RotateCertificates(t *testing.T) {
 			close(stopCh)
 			<-controllerDone
 		}()
-		<-signCh
+		firstCert := <-signCh
 		// Wait for the controller to finish syncing the first certificate.
 		synctest.Wait()
 		require.True(t, fakeController.HasSynced())
-		require.NotNil(t, fakeController.certificateKeyPair)
 
-		// the rotation interval is determined by nextRotationDeadline as notBefore + (notAfter -
+		// The rotation interval is determined by nextRotationDeadline as notBefore + (notAfter -
 		// notBefore) * k, where k is >= 0.7 and <= 0.9. We would therefore expect the rotation
 		// interval to be between [7, 9] seconds.
 		// Verify that CSR should not be signed before the minimum rotation deadline (7s).
-		notBefore := fakeController.certificateKeyPair.certificate[0].NotBefore
+		notBefore := firstCert.NotBefore
 		time.Sleep(time.Until(notBefore.Add(time.Millisecond * 6999)))
 		select {
 		case <-signCh:
@@ -362,6 +361,8 @@ func TestController_RotateCertificates(t *testing.T) {
 		}
 		// Wait for the signer to finish signing two CSRs.
 		<-signCh
+		// Wait for the controller to finish syncing the second certificate.
+		synctest.Wait()
 		list, err := fakeController.kubeClient.CertificatesV1().CertificateSigningRequests().List(
 			context.TODO(),
 			metav1.ListOptions{},
@@ -397,7 +398,7 @@ func createCertificate(
 	publicKey crypto.PublicKey,
 	currentTime time.Time,
 	expirationDuration time.Duration,
-) []byte {
+) ([]byte, *x509.Certificate) {
 	template := newIPsecCertTemplate(t, nodeName, currentTime, currentTime.Add(expirationDuration))
 	derBytes, err := x509.CreateCertificate(rand.Reader, template, caCert, publicKey, caKey)
 	require.NoError(t, err)
@@ -406,7 +407,7 @@ func createCertificate(
 	assert.Len(t, certs, 1)
 	encoded, err := certutil.EncodeCertificates(certs...)
 	require.NoError(t, err)
-	return encoded
+	return encoded, certs[0]
 }
 
 func signCSR(
@@ -414,14 +415,14 @@ func signCSR(
 	controller *fakeController,
 	csr *certificatesv1.CertificateSigningRequest,
 	expirationDuration time.Duration,
-) {
+) *x509.Certificate {
 	assert.Empty(t, csr.Status.Certificate)
 	block, remain := pem.Decode(csr.Spec.Request)
 	assert.Empty(t, remain)
 	req, err := x509.ParseCertificateRequest(block.Bytes)
 	assert.NoError(t, err)
 
-	newCert := createCertificate(t, req.Subject.CommonName, controller.caCert,
+	newCert, cert := createCertificate(t, req.Subject.CommonName, controller.caCert,
 		controller.caKey, req.PublicKey, controller.clock.Now(), expirationDuration)
 	toUpdate := csr.DeepCopy()
 	toUpdate.Status.Conditions = append(toUpdate.Status.Conditions, certificatesv1.CertificateSigningRequestCondition{
@@ -438,6 +439,7 @@ func signCSR(
 		UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{})
 	assert.NoError(t, err)
 	t.Logf("Sign CSR %q successfully", csr.Name)
+	return cert
 }
 
 func Test_jitteryDuration(t *testing.T) {

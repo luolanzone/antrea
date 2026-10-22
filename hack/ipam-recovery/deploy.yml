@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: antrea-ipam-recovery
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: antrea-ipam-recovery
+  namespace: antrea-ipam-recovery
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: antrea-ipam-recovery-state
+  namespace: antrea-ipam-recovery
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [antrea-ipam-recovery-state]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: antrea-ipam-recovery-state
+  namespace: antrea-ipam-recovery
+subjects:
+  - kind: ServiceAccount
+    name: antrea-ipam-recovery
+    namespace: antrea-ipam-recovery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: antrea-ipam-recovery-state
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: antrea-ipam-recovery
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources: [pods/eviction]
+    verbs: [create]
+  - apiGroups: [apps]
+    resources: [replicasets, deployments]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: antrea-ipam-recovery
+subjects:
+  - kind: ServiceAccount
+    name: antrea-ipam-recovery
+    namespace: antrea-ipam-recovery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: antrea-ipam-recovery
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: antrea-ipam-recovery
+  namespace: antrea-ipam-recovery
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: antrea-ipam-recovery
+  template:
+    metadata:
+      labels:
+        app: antrea-ipam-recovery
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: antrea-ipam-recovery
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        kubernetes.io/os: linux
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: recovery
+          # Build and publish your reviewed image, then replace with its immutable digest.
+          image: antrea-ipam-recovery:local
+          imagePullPolicy: IfNotPresent
+          args:
+            - --dry-run=true
+            - --interval=15s
+            - --confirm-duration=1m
+            - --min-pod-age=2m
+            - --recovery-timeout=30m
+            - --cooldown=30m
+            - --max-daily-recoveries=3
+            - --max-pods=8
+          ports:
+            - name: metrics
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15

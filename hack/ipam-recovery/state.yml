@@ -1,0 +1,9 @@
+# Bootstrap once with kubectl create, after deploy.yml creates the Namespace.
+# Keep this file out of recurring apply / GitOps reconciliation: the controller owns the data.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: antrea-ipam-recovery-state
+  namespace: antrea-ipam-recovery
+data:
+  state.json: '{"version":1}'

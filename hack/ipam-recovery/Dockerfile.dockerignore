@@ -1,0 +1,8 @@
+*
+!go.mod
+!go.sum
+!hack
+hack/*
+!hack/ipam-recovery
+hack/ipam-recovery/*
+!hack/ipam-recovery/*.go
